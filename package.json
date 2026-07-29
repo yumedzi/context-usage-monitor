@@ -1,0 +1,199 @@
+{
+  "name": "context-usage-monitor",
+  "displayName": "Context and Usage Monitor for Claude Code",
+  "description": "Status bar monitor for Claude Code: correct context-window %, cache hit rate, per-turn and monthly cost. Not affiliated with Anthropic.",
+  "version": "0.1.0",
+  "publisher": "vmoyseyenko",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "claude",
+    "claude code",
+    "anthropic",
+    "ai",
+    "token",
+    "cost",
+    "cache",
+    "context",
+    "usage",
+    "status bar",
+    "monitor",
+    "llm"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "icon": "icon.png",
+  "galleryBanner": {
+    "color": "#1a1a2e",
+    "theme": "dark"
+  },
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "contextUsageMonitor.showReport",
+        "title": "Claude Code Monitor: Show Usage Report"
+      },
+      {
+        "command": "contextUsageMonitor.recalculateMonthly",
+        "title": "Claude Code Monitor: Recalculate Monthly Usage"
+      },
+      {
+        "command": "contextUsageMonitor.openPricingPage",
+        "title": "Claude Code Monitor: Open Anthropic Pricing Page"
+      },
+      {
+        "command": "contextUsageMonitor.copyDiagnostics",
+        "title": "Claude Code Monitor: Copy Diagnostics"
+      }
+    ],
+    "configuration": {
+      "title": "Context and Usage Monitor for Claude Code",
+      "properties": {
+        "contextUsageMonitor.planType": {
+          "type": "string",
+          "enum": ["subscription", "api"],
+          "enumDescriptions": [
+            "Pro / Max / Team — flat monthly fee. Costs shown are API-equivalent, not actual charges.",
+            "API key (pay-as-you-go) — costs shown are real charges."
+          ],
+          "default": "subscription",
+          "description": "Your Claude plan type. Controls the ~ prefix on costs and the cost label."
+        },
+        "contextUsageMonitor.statusBar.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the status bar item."
+        },
+        "contextUsageMonitor.statusBar.alignment": {
+          "type": "string",
+          "enum": ["left", "right"],
+          "default": "right",
+          "description": "Status bar alignment."
+        },
+        "contextUsageMonitor.statusBar.priority": {
+          "type": "number",
+          "default": 100,
+          "description": "Status bar priority (higher = further left within its alignment)."
+        },
+        "contextUsageMonitor.statusBar.segments": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["model", "context", "contextTokens", "cacheHit", "turnCost", "sessionCost", "monthlyCost", "plan", "idleState"]
+          },
+          "default": ["model", "context", "cacheHit", "turnCost"],
+          "description": "Which segments to show in the status bar, in order."
+        },
+        "contextUsageMonitor.statusBar.separator": {
+          "type": "string",
+          "default": " | ",
+          "description": "Separator between status bar segments."
+        },
+        "contextUsageMonitor.statusBar.colorMode": {
+          "type": "string",
+          "enum": ["none", "cacheHit", "contextFill"],
+          "default": "none",
+          "description": "Background color policy for the status bar item. 'none' keeps the default theme background."
+        },
+        "contextUsageMonitor.statusBar.showIcon": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the leading robot icon."
+        },
+        "contextUsageMonitor.tooltip.sections": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["turn", "context", "cache", "cost", "monthly", "plan", "links"]
+          },
+          "default": ["turn", "context", "cache", "cost", "monthly", "plan", "links"],
+          "description": "Which sections to show in the hover tooltip, in order."
+        },
+        "contextUsageMonitor.pricing.models": {
+          "type": "object",
+          "default": {},
+          "description": "Per-model pricing/context-window overrides, merged over the built-in defaults. Keys are model IDs (e.g. 'claude-opus-5'); values may set any of input, output, cacheRead, cacheWrite5m, cacheWrite1h ($/token) and contextWindow (tokens).",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "input": { "type": "number" },
+              "output": { "type": "number" },
+              "cacheRead": { "type": "number" },
+              "cacheWrite5m": { "type": "number" },
+              "cacheWrite1h": { "type": "number" },
+              "contextWindow": { "type": "number" }
+            }
+          }
+        },
+        "contextUsageMonitor.pricing.currencySymbol": {
+          "type": "string",
+          "default": "$",
+          "description": "Currency symbol used when formatting costs."
+        },
+        "contextUsageMonitor.usage.billingCycleStartDay": {
+          "type": "number",
+          "default": 1,
+          "minimum": 1,
+          "maximum": 28,
+          "description": "Day of the month your billing cycle starts on (1-28). The monthly cost total covers from this day in the current or previous month through now."
+        },
+        "contextUsageMonitor.filters.modelPattern": {
+          "type": "string",
+          "default": "^claude-",
+          "description": "Regular expression a model id must match to be counted. Excludes non-Claude / synthetic records."
+        },
+        "contextUsageMonitor.filters.includeSidechainsInContext": {
+          "type": "boolean",
+          "default": false,
+          "description": "Include subagent (sidechain) turns when computing the main context-window gauge. They are always included in cost totals."
+        },
+        "contextUsageMonitor.contextWindowOverrides": {
+          "type": "object",
+          "default": {},
+          "description": "Per-model context window overrides (tokens), keyed by model id. Shortcut for pricing.models.<id>.contextWindow."
+        }
+      }
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yumedzi/context-usage-monitor"
+  },
+  "author": {
+    "name": "Viktor Moyseyenko",
+    "url": "https://github.com/yumedzi"
+  },
+  "bugs": {
+    "url": "https://github.com/yumedzi/context-usage-monitor/issues"
+  },
+  "homepage": "https://github.com/yumedzi/context-usage-monitor#readme",
+  "scripts": {
+    "compile": "tsc -p . --noEmit",
+    "build": "node esbuild.config.mjs",
+    "watch": "node esbuild.config.mjs --watch",
+    "lint": "eslint src test --ext .ts",
+    "test": "vitest run",
+    "package": "npm run compile && npm run lint && npm test && npm run build -- --production && vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^7.16.0",
+    "@typescript-eslint/parser": "^7.16.0",
+    "@vscode/vsce": "^2.32.0",
+    "esbuild": "^0.23.0",
+    "eslint": "^8.57.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}
