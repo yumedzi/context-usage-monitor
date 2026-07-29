@@ -16,6 +16,11 @@ are the one deliberate, disclosable exception — see
 > independent, community-built tool. "Claude Code" is referenced only to
 > describe compatibility.
 
+## Installation
+
+Install from the VS Code Marketplace:
+[Context and Usage Monitor for Claude Code](https://marketplace.visualstudio.com/items?itemName=viktor-moyseyenko.context-usage-monitor).
+
 ## Why this exists
 
 This project started as a rewrite of
@@ -169,7 +174,9 @@ machines, each one tracks its own total.
 
 ## Installing
 
-Not yet published to a marketplace. To try it locally:
+Install from the
+[VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=viktor-moyseyenko.context-usage-monitor),
+or from a `.vsix` file:
 
 1. Download the `.vsix` file.
 2. In VS Code: Extensions view → `...` menu → **Install from VSIX...**
