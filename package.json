@@ -2,7 +2,7 @@
   "name": "context-usage-monitor",
   "displayName": "Context and Usage Monitor for Claude Code",
   "description": "Status bar monitor for Claude Code: correct context-window %, cache hit rate, per-turn and monthly cost. Not affiliated with Anthropic.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "viktor-moyseyenko",
   "license": "MIT",
   "engines": {
@@ -169,14 +169,19 @@
         "contextUsageMonitor.rateLimits.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Show 5-hour/weekly subscription rate-limit gauges (e.g. '5h:34% · w:53%') in the status bar. Makes a network request to api.anthropic.com using your existing local Claude Code OAuth token (the same one Claude Code itself uses) — only when you're on a subscription plan; never on API-key/Bedrock/Vertex/Foundry billing, where it's silently hidden. At most one request per refreshSeconds per machine, shared across all open VS Code windows."
+          "description": "Show 5-hour/weekly subscription rate-limit gauges (e.g. '5h:34% · w:53%') in the status bar. Makes a network request to api.anthropic.com using your existing local Claude Code OAuth token (the same one Claude Code itself uses) — only when you're on a subscription plan; never on API-key/Bedrock/Vertex/Foundry billing, where it's silently hidden. Refreshes the moment a new Claude Code turn is detected, plus a periodic backstop check (see scheduledCheckEnabled) — shared across all open VS Code windows via a local cache, so opening more windows never multiplies the request rate."
         },
         "contextUsageMonitor.rateLimits.refreshSeconds": {
           "type": "number",
-          "default": 120,
+          "default": 900,
           "minimum": 30,
           "maximum": 3600,
-          "description": "How often the 5-hour/weekly rate-limit gauges refresh from the network, in seconds. Raise it if you have many windows open and see rate-limit errors on the fetch itself."
+          "description": "Minimum interval, in seconds, between network checks for the 5-hour/weekly rate-limit gauges — acts as both the scheduled backstop's interval and the floor below which the on-new-turn trigger won't re-fetch. Default is 15 minutes; raise it if you have many windows open and see rate-limit errors on the fetch itself."
+        },
+        "contextUsageMonitor.rateLimits.scheduledCheckEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Also run a periodic backstop check every refreshSeconds, in addition to refreshing whenever a new Claude Code turn is detected. The on-turn trigger alone keeps the gauge accurate while you're actively working; this backstop exists only to catch a rate-limit window resetting during a long idle stretch with no activity. Disable it for zero idle-time network use, at the cost of a possibly stale gauge until your next turn."
         },
         "contextUsageMonitor.rateLimits.showWeekly": {
           "type": "boolean",

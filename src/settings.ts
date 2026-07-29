@@ -47,9 +47,12 @@ export interface ExtensionConfig {
   };
   contextWindowOverrides: Record<string, number>;
   rateLimits: {
-    /** Shows 5-hour/weekly subscription rate-limit gauges in the status bar. Makes a network request to api.anthropic.com using your existing local Claude Code OAuth token — only when on a subscription plan (never on API-key/Bedrock/Vertex billing), at most once per refreshSeconds per machine. */
+    /** Shows 5-hour/weekly subscription rate-limit gauges in the status bar. Makes a network request to api.anthropic.com using your existing local Claude Code OAuth token — only when on a subscription plan (never on API-key/Bedrock/Vertex billing). Refreshed the moment a new Claude Code turn is detected (near-real-time while you're actively working), plus a periodic backstop check so the gauge doesn't go stale during long idle stretches (see scheduledCheckEnabled). */
     enabled: boolean;
+    /** Minimum interval between network checks — the cache/backoff floor used by both the on-turn trigger and the scheduled backstop, and the backstop's own interval. */
     refreshSeconds: number;
+    /** Also run a periodic backstop check every refreshSeconds, in addition to checking on every new turn. Disabling this means the gauge only updates when you're actually using Claude Code — zero idle network use, at the cost of staleness if a rate-limit window resets while nothing happened. */
+    scheduledCheckEnabled: boolean;
     showWeekly: boolean;
     showPerModelWeekly: boolean;
     colorThresholds: RateLimitColorThresholds;
@@ -89,7 +92,8 @@ export function readConfig(): ExtensionConfig {
     contextWindowOverrides: cfg.get('contextWindowOverrides', {}),
     rateLimits: {
       enabled: cfg.get('rateLimits.enabled', true),
-      refreshSeconds: cfg.get('rateLimits.refreshSeconds', 120),
+      refreshSeconds: cfg.get('rateLimits.refreshSeconds', 900),
+      scheduledCheckEnabled: cfg.get('rateLimits.scheduledCheckEnabled', true),
       showWeekly: cfg.get('rateLimits.showWeekly', true),
       showPerModelWeekly: cfg.get('rateLimits.showPerModelWeekly', false),
       colorThresholds: cfg.get('rateLimits.colorThresholds', { warning: 80, error: 90 }),

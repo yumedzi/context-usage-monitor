@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.3.0
+
+- The rate-limit gauges now refresh **the moment a new Claude Code turn is
+  detected**, instead of relying solely on a fixed poll timer — piggybacked
+  on the transcript scan the extension already does every 10s for
+  context/cost, so this costs nothing extra to detect. In practice the
+  gauge is more responsive during active use than the old 120s timer ever
+  was, while making far fewer requests overall.
+- `rateLimits.refreshSeconds` default raised from `120` to `900` (15
+  minutes) and repurposed: it's now the minimum interval between checks
+  (shared floor for both triggers below) and the interval of the backstop
+  timer, not the primary polling cadence.
+- New setting `rateLimits.scheduledCheckEnabled` (default `true`): the
+  periodic backstop check, kept separate from the on-new-turn trigger. It
+  exists only to catch a rate-limit window resetting during a long idle
+  stretch with no activity to trigger a check on its own. Disable it for
+  zero network use while idle, at the cost of a possibly stale gauge until
+  your next turn.
+- No change to the underlying fetch/cache/backoff logic — both triggers
+  share the same TTL-gated cache, so neither can cause more than one
+  request per `refreshSeconds` per machine.
+
 ## 0.2.0
 
 - Added 5-hour/weekly subscription rate-limit gauges (`5h:34% · w:53%`) to

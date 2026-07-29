@@ -5,9 +5,12 @@ transcript files (`~/.claude/projects/**/*.jsonl`) and shows accurate,
 real-time context-window usage, cache hit rate, and cost. On a Claude
 subscription (Pro/Max/Team) it also shows your 5-hour and weekly rate-limit
 gauges (`5h:34% · w:53%`) — the limits that actually govern a subscription,
-where dollars don't. Transcript-derived numbers stay fully offline; the
-rate-limit gauges are the one deliberate, disclosable exception — see
-[Network access](#network-access) below.
+where dollars don't. These gauges update **the moment Claude Code finishes a
+turn**, not on a blind polling schedule — see
+[How the rate-limit gauges stay fresh](#how-the-rate-limit-gauges-stay-fresh)
+below. Transcript-derived numbers stay fully offline; the rate-limit gauges
+are the one deliberate, disclosable exception — see
+[Network access](#network-access).
 
 > **Not affiliated with, endorsed by, or sponsored by Anthropic.** This is an
 > independent, community-built tool. "Claude Code" is referenced only to
@@ -56,8 +59,13 @@ exception, described in full in [Network access](#network-access).
   cache-write pricing.
 - A configurable local monthly spend total (see [Scope](#scope) below).
 - On a subscription plan: 5-hour and weekly rate-limit gauges right in the
-  status bar (`5h:34% · w:53%`), on by default — see
-  [Network access](#network-access). Silently absent on API-key/Bedrock/
+  status bar (`5h:34% · w:53%`), on by default. They refresh **the instant a
+  new Claude Code turn is detected** — not on a fixed timer — so the number
+  you see reflects what you actually just did, with a lightweight 15-minute
+  backstop check purely so the gauge doesn't go stale if you leave the
+  editor open and idle through a reset. See
+  [How the rate-limit gauges stay fresh](#how-the-rate-limit-gauges-stay-fresh)
+  and [Network access](#network-access). Silently absent on API-key/Bedrock/
   Vertex/Foundry billing, where these limits don't apply.
 - Every status bar segment and tooltip section is independently toggleable.
 - Commands: **Show Usage Report**, **Recalculate Monthly Usage**, **Open
@@ -87,10 +95,44 @@ All settings live under `contextUsageMonitor.*`:
 | `filters.includeSidechainsInContext` | `false` | Include subagent turns in the context gauge (they always count toward cost). |
 | `contextWindowOverrides` | `{}` | Shortcut for `pricing.models.<id>.contextWindow`. |
 | `rateLimits.enabled` | `true` | Show the 5-hour/weekly gauges. Makes a network request — see [Network access](#network-access). |
-| `rateLimits.refreshSeconds` | `120` | How often the gauges refresh from the network (30–3600s). Shared across all open windows via a local cache file, so this isn't multiplied per window. |
+| `rateLimits.refreshSeconds` | `900` (15 min) | Minimum interval between network checks (30–3600s) — the floor below which the on-new-turn trigger won't re-fetch, and the scheduled backstop's own interval. |
+| `rateLimits.scheduledCheckEnabled` | `true` | Also check on a `refreshSeconds` schedule, in addition to checking on every new turn. Turn off for zero idle-time network use — see [How the rate-limit gauges stay fresh](#how-the-rate-limit-gauges-stay-fresh). |
 | `rateLimits.showWeekly` | `true` | Show the weekly (`w:`) gauge alongside the 5-hour one. |
 | `rateLimits.showPerModelWeekly` | `false` | Show per-model weekly gauges (Opus/Sonnet) in the tooltip, when your plan reports them (Max only). |
 | `rateLimits.colorThresholds` | `{"warning":80,"error":90}` | Thresholds for `statusBar.colorMode: "rateLimit"`. |
+
+## How the rate-limit gauges stay fresh
+
+Most extensions that show this kind of thing poll on a fixed timer — showing
+a number that's up to `N` seconds stale even while you're actively working,
+and still polling every `N` seconds even when you've stepped away and
+nothing is happening. This one is event-driven instead:
+
+- **On every new turn.** The same lightweight transcript scan this extension
+  already does every 10 seconds to update context/cost also notices when a
+  genuinely new Claude Code record has appeared. The instant it does, the
+  rate-limit gauge refreshes — so right after you finish a turn, the number
+  you see is the number that turn actually produced, not a stale reading
+  from up to `refreshSeconds` ago.
+- **A 15-minute backstop, not the main driver.** `rateLimits.refreshSeconds`
+  (default `900` = 15 min) now exists only to catch the case where you leave
+  the editor open and idle for a long stretch spanning a 5-hour or weekly
+  reset — with no new turn to trigger a check, the gauge would otherwise
+  keep showing a stale percentage indefinitely. Set
+  `rateLimits.scheduledCheckEnabled: false` to disable this entirely: the
+  gauge then updates *only* when you're actually using Claude Code, at the
+  cost of possibly showing a stale number if a window resets while you're
+  away.
+- **Both paths share one safety net.** Whichever one fires, the actual
+  network call still only happens if the on-disk cache is older than
+  `refreshSeconds` — a burst of records from one busy agentic turn (many
+  tool calls in a row) can trigger the check repeatedly without causing a
+  burst of requests; it just resolves from cache until the interval is
+  actually up.
+
+Net effect: on a typical active session, this is *more* responsive than a
+120s timer ever was, while making meaningfully fewer requests overall —
+during any stretch where you're not generating new turns, it makes none.
 
 ## Network access
 
@@ -105,14 +147,17 @@ on disk. The 5-hour/weekly rate-limit gauges are the one exception:
   via Claude.ai login). If Claude Code is configured for API-key, Bedrock,
   Vertex, or Foundry billing, the request is never made and the gauges are
   silently hidden — those don't have 5-hour/weekly limits.
-- At most one request per `rateLimits.refreshSeconds` **per machine**,
-  shared across every open VS Code window through a local cache file
+- Triggered by a new turn or the 15-minute backstop (see above), but never
+  more than once per `rateLimits.refreshSeconds` **per machine**, shared
+  across every open VS Code window through a local cache file
   (`~/.claude/.context-usage-monitor/rate-cache.json`) — opening more
   windows doesn't multiply the request rate.
 - No telemetry, no third-party endpoint, nothing beyond the two Anthropic
   URLs above. The token itself never appears in the tooltip, "Copy
   Diagnostics" output, or any cache file.
-- Turn it off entirely with `contextUsageMonitor.rateLimits.enabled: false`.
+- Turn it off entirely with `contextUsageMonitor.rateLimits.enabled: false`,
+  or keep the gauges but drop the idle-time backstop with
+  `rateLimits.scheduledCheckEnabled: false`.
 
 ## Scope
 

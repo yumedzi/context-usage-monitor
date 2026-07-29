@@ -40,6 +40,12 @@ let currentRates: RateLimitSnapshot | null = null;
 let monthlyCache: MonthlyUsageCache | undefined;
 let rateTimer: ReturnType<typeof setInterval> | undefined;
 
+// Tracks the most recently observed transcript record's identity so a
+// genuinely new Claude Code turn can trigger an immediate rate-limit
+// refresh, rather than waiting on the (now much coarser) backstop timer.
+let lastRateLimitTriggerKey: string | null = null;
+let rateLimitBaselineSet = false;
+
 export function activate(context: vscode.ExtensionContext): void {
   extContext = context;
   statusBar = new StatusBarController();
@@ -166,6 +172,8 @@ async function refreshTurn(): Promise<void> {
     render();
     return;
   }
+
+  maybeTriggerRateLimitRefresh(mainRecord);
 
   const isOffWorkspace = workspacePath !== null && (located.usedFallback || !cwdVerified);
   if (isOffWorkspace) {
@@ -333,6 +341,16 @@ async function refreshMonthly(): Promise<void> {
 // Rate-limit refresh: 5-hour/weekly subscription gauges, fetched from
 // Anthropic's OAuth usage API (see core/usageApi.ts). Only makes a network
 // call when on subscription billing; silently a no-op otherwise.
+//
+// Two independent triggers feed the same refreshRateLimits(), which is
+// always TTL-gated by core/usageApi.ts's on-disk cache — neither trigger can
+// cause more than one network round-trip per refreshSeconds per machine:
+//   1. maybeTriggerRateLimitRefresh(), called from refreshTurn() whenever a
+//      genuinely new transcript record appears — keeps the gauge accurate
+//      in near-real-time while you're actually working.
+//   2. The rateTimer backstop (gated on rateLimits.scheduledCheckEnabled) —
+//      exists only so the gauge doesn't go stale during a long idle stretch
+//      where a rate-limit window resets with no new turn to catch it.
 // ---------------------------------------------------------------------------
 
 function clampRefreshSeconds(seconds: number): number {
@@ -341,7 +359,7 @@ function clampRefreshSeconds(seconds: number): number {
 
 function startRateTimer(): void {
   stopRateTimer();
-  if (!config.rateLimits.enabled) return;
+  if (!config.rateLimits.enabled || !config.rateLimits.scheduledCheckEnabled) return;
   const seconds = clampRefreshSeconds(config.rateLimits.refreshSeconds);
   rateTimer = setInterval(() => void refreshRateLimits(), seconds * 1000);
 }
@@ -364,6 +382,36 @@ async function refreshRateLimits(force = false): Promise<void> {
     force,
   });
   render();
+}
+
+/**
+ * Detects a genuinely new transcript record (by messageId/requestId, or
+ * timestamp when neither is present) and triggers an immediate rate-limit
+ * check — still subject to fetchRateLimits()'s own TTL, so a burst of
+ * records from one agentic turn can't cause a burst of requests.
+ *
+ * The very first record seen after activation only establishes the
+ * baseline and does *not* trigger a fetch — activate() already primes
+ * currentRates once on its own, so this avoids a redundant duplicate call
+ * at startup.
+ */
+function maybeTriggerRateLimitRefresh(record: UsageRecord): void {
+  if (!config.rateLimits.enabled) return;
+
+  const recordKey =
+    record.messageId || record.requestId ? `${record.messageId ?? ''}::${record.requestId ?? ''}` : record.timestamp;
+  if (!recordKey) return;
+
+  if (!rateLimitBaselineSet) {
+    lastRateLimitTriggerKey = recordKey;
+    rateLimitBaselineSet = true;
+    return;
+  }
+
+  if (recordKey !== lastRateLimitTriggerKey) {
+    lastRateLimitTriggerKey = recordKey;
+    void refreshRateLimits();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -412,6 +460,7 @@ async function copyDiagnostics(): Promise<void> {
     `state: ${currentState.kind}`,
     currentState.kind === 'active' ? `model: ${currentState.turn.model} (resolved: ${!currentState.turn.modelUnknown})` : '',
     `rateLimits.enabled: ${config.rateLimits.enabled}`,
+    `rateLimits.scheduledCheckEnabled: ${config.rateLimits.scheduledCheckEnabled}`,
     `rateLimits.billingMode: ${currentRates?.billingMode ?? '(none)'}`,
     `rateLimits.planLabel: ${currentRates?.planLabel ?? '(none)'}`,
     `rateLimits.tokenSource: ${rateMeta?.tokenSource ?? '(none)'}`,
