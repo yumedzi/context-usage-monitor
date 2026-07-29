@@ -3,6 +3,7 @@ export interface TurnSnapshot {
   modelLabel: string;
   /** true if the model id didn't resolve against the registry — never guess a context window, show this instead */
   modelUnknown: boolean;
+  effort: string | null;
   contextPercent: number;
   contextTokensUsed: number;
   contextWindow: number;

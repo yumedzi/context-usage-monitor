@@ -50,6 +50,20 @@ describe('parseUsageLine', () => {
     const record = parseUsageLine(line, opts);
     expect(record?.model).toBe('claude-haiku-4-5-20251001');
   });
+
+  it('parses the top-level effort field, sibling of message (not nested)', () => {
+    const line = JSON.stringify({
+      type: 'assistant',
+      effort: 'high',
+      message: { id: 'm1', model: 'claude-sonnet-5', usage: { input_tokens: 100, output_tokens: 10 } },
+    });
+    expect(parseUsageLine(line, opts)?.effort).toBe('high');
+  });
+
+  it('defaults effort to null when absent', () => {
+    const line = readFixture('dated-model.jsonl').trim();
+    expect(parseUsageLine(line, opts)?.effort).toBeNull();
+  });
 });
 
 describe('findLastUsageRecord', () => {

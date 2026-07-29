@@ -8,14 +8,11 @@ export type StatusBarSegment =
   | 'cacheHit'
   | 'turnCost'
   | 'sessionCost'
-  | 'monthlyCost'
-  | 'plan'
   | 'idleState';
 
-export type TooltipSection = 'turn' | 'context' | 'cache' | 'cost' | 'monthly' | 'plan' | 'links';
+export type TooltipSection = 'turn' | 'context' | 'cache' | 'cost' | 'monthly' | 'links';
 
 export interface ExtensionConfig {
-  planType: 'subscription' | 'api';
   statusBar: {
     enabled: boolean;
     alignment: 'left' | 'right';
@@ -24,6 +21,10 @@ export interface ExtensionConfig {
     separator: string;
     colorMode: 'none' | 'cacheHit' | 'contextFill';
     showIcon: boolean;
+    /** Show reasoning-effort level ("low"/"medium"/"high") in parentheses after the model segment. */
+    showEffort: boolean;
+    /** Show month-to-date usage cost, appended at the end of the status bar. Renders in every state (including idle), not just during an active turn. */
+    showMonthlyCost: boolean;
   };
   tooltip: {
     sections: TooltipSection[];
@@ -47,18 +48,19 @@ const CONFIG_SECTION = 'contextUsageMonitor';
 export function readConfig(): ExtensionConfig {
   const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
   return {
-    planType: cfg.get('planType', 'subscription'),
     statusBar: {
       enabled: cfg.get('statusBar.enabled', true),
       alignment: cfg.get('statusBar.alignment', 'right'),
       priority: cfg.get('statusBar.priority', 100),
-      segments: cfg.get('statusBar.segments', ['model', 'context', 'cacheHit', 'turnCost']),
-      separator: cfg.get('statusBar.separator', ' | '),
+      segments: cfg.get('statusBar.segments', ['model', 'context', 'turnCost']),
+      separator: cfg.get('statusBar.separator', '·'),
       colorMode: cfg.get('statusBar.colorMode', 'none'),
       showIcon: cfg.get('statusBar.showIcon', true),
+      showEffort: cfg.get('statusBar.showEffort', true),
+      showMonthlyCost: cfg.get('statusBar.showMonthlyCost', false),
     },
     tooltip: {
-      sections: cfg.get('tooltip.sections', ['turn', 'context', 'cache', 'cost', 'monthly', 'plan', 'links']),
+      sections: cfg.get('tooltip.sections', ['turn', 'context', 'cache', 'cost', 'monthly', 'links']),
     },
     pricing: {
       models: cfg.get('pricing.models', {}),

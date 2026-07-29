@@ -3,7 +3,7 @@
   "displayName": "Context and Usage Monitor for Claude Code",
   "description": "Status bar monitor for Claude Code: correct context-window %, cache hit rate, per-turn and monthly cost. Not affiliated with Anthropic.",
   "version": "0.1.0",
-  "publisher": "vmoyseyenko",
+  "publisher": "viktor-moyseyenko",
   "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
@@ -41,34 +41,24 @@
     "commands": [
       {
         "command": "contextUsageMonitor.showReport",
-        "title": "Claude Code Monitor: Show Usage Report"
+        "title": "Context and Usage Monitor: Show Usage Report"
       },
       {
         "command": "contextUsageMonitor.recalculateMonthly",
-        "title": "Claude Code Monitor: Recalculate Monthly Usage"
+        "title": "Context and Usage Monitor: Recalculate Monthly Usage"
       },
       {
         "command": "contextUsageMonitor.openPricingPage",
-        "title": "Claude Code Monitor: Open Anthropic Pricing Page"
+        "title": "Context and Usage Monitor: Open Anthropic Pricing Page"
       },
       {
         "command": "contextUsageMonitor.copyDiagnostics",
-        "title": "Claude Code Monitor: Copy Diagnostics"
+        "title": "Context and Usage Monitor: Copy Diagnostics"
       }
     ],
     "configuration": {
       "title": "Context and Usage Monitor for Claude Code",
       "properties": {
-        "contextUsageMonitor.planType": {
-          "type": "string",
-          "enum": ["subscription", "api"],
-          "enumDescriptions": [
-            "Pro / Max / Team — flat monthly fee. Costs shown are API-equivalent, not actual charges.",
-            "API key (pay-as-you-go) — costs shown are real charges."
-          ],
-          "default": "subscription",
-          "description": "Your Claude plan type. Controls the ~ prefix on costs and the cost label."
-        },
         "contextUsageMonitor.statusBar.enabled": {
           "type": "boolean",
           "default": true,
@@ -89,15 +79,15 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["model", "context", "contextTokens", "cacheHit", "turnCost", "sessionCost", "monthlyCost", "plan", "idleState"]
+            "enum": ["model", "context", "contextTokens", "cacheHit", "turnCost", "sessionCost", "idleState"]
           },
-          "default": ["model", "context", "cacheHit", "turnCost"],
-          "description": "Which segments to show in the status bar, in order."
+          "default": ["model", "context", "turnCost"],
+          "description": "Which segments to show in the status bar, in order. 'cacheHit' is off by default — add it here to show. Monthly cost has its own toggle: statusBar.showMonthlyCost."
         },
         "contextUsageMonitor.statusBar.separator": {
           "type": "string",
-          "default": " | ",
-          "description": "Separator between status bar segments."
+          "default": "·",
+          "description": "Separator character between status bar segments (no need to add spaces — they're added automatically around it)."
         },
         "contextUsageMonitor.statusBar.colorMode": {
           "type": "string",
@@ -110,13 +100,23 @@
           "default": true,
           "description": "Show the leading robot icon."
         },
+        "contextUsageMonitor.statusBar.showEffort": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the reasoning-effort level (low/medium/high) in parentheses after the model name, when Claude Code recorded one for the turn."
+        },
+        "contextUsageMonitor.statusBar.showMonthlyCost": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show total month-to-date usage cost in the status bar, appended at the end. Unlike the other segments, this renders even when idle — it's a background total, not tied to the current turn."
+        },
         "contextUsageMonitor.tooltip.sections": {
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["turn", "context", "cache", "cost", "monthly", "plan", "links"]
+            "enum": ["turn", "context", "cache", "cost", "monthly", "links"]
           },
-          "default": ["turn", "context", "cache", "cost", "monthly", "plan", "links"],
+          "default": ["turn", "context", "cache", "cost", "monthly", "links"],
           "description": "Which sections to show in the hover tooltip, in order."
         },
         "contextUsageMonitor.pricing.models": {

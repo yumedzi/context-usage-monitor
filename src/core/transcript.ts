@@ -12,6 +12,8 @@ export interface UsageRecord {
   messageId: string | null;
   requestId: string | null;
   isSidechain: boolean;
+  /** Reasoning effort ("low"/"medium"/"high") Claude Code recorded for this turn, if any. */
+  effort: string | null;
 }
 
 export interface TranscriptFilterOptions {
@@ -37,6 +39,8 @@ interface RawLine {
   sessionId?: string;
   timestamp?: string;
   requestId?: string;
+  /** Top-level sibling of `message`, not nested inside it. */
+  effort?: string;
   message?: {
     id?: string;
     model?: string;
@@ -114,6 +118,7 @@ export function parseUsageLine(line: string, opts: TranscriptFilterOptions): Usa
     messageId: msg.id ?? null,
     requestId: raw.requestId ?? null,
     isSidechain: raw.isSidechain === true,
+    effort: raw.effort ?? null,
   };
 }
 

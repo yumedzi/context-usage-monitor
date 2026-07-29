@@ -36,8 +36,6 @@ export function buildTooltip(
     appendSection(md, section, turn, config, monthly, sessionCost, diagnostics);
   }
 
-  md.appendMarkdown('\n---\n*Not affiliated with, endorsed by, or sponsored by Anthropic.*');
-
   return md;
 }
 
@@ -58,6 +56,9 @@ function appendSection(
       md.appendMarkdown(
         `**Model:** ${turn.modelUnknown ? `${turn.model} _(unrecognized — add it via \`contextUsageMonitor.pricing.models\`)_` : turn.modelLabel}\n\n`,
       );
+      if (turn.effort) {
+        md.appendMarkdown(`**Effort:** ${turn.effort}\n\n`);
+      }
       return;
 
     case 'context':
@@ -81,28 +82,18 @@ function appendSection(
       );
       return;
 
-    case 'cost': {
+    case 'cost':
       if (!turn) return;
-      const prefix = config.planType === 'subscription' ? '~' : '';
-      const label = config.planType === 'subscription' ? 'API-equivalent' : 'Actual';
-      md.appendMarkdown(`**Turn cost (${label}):** ${prefix}${formatCost(turn.turnCost, turn.turnCostKnown, currency)}\n\n`);
+      md.appendMarkdown(`**Turn cost:** ${formatCost(turn.turnCost, turn.turnCostKnown, currency)}\n\n`);
       if (sessionCost) {
-        md.appendMarkdown(`**Session cost:** ${prefix}${formatCost(sessionCost.cost, sessionCost.known, currency)}\n\n`);
+        md.appendMarkdown(`**Session cost:** ${formatCost(sessionCost.cost, sessionCost.known, currency)}\n\n`);
       }
       return;
-    }
 
     case 'monthly':
       if (!monthly) return;
       md.appendMarkdown(
-        `**Month-to-date (since ${monthly.periodStartISODate}):** ` +
-          `${config.planType === 'subscription' ? '~' : ''}${formatCost(monthly.totalCostUSD, monthly.known, currency)}\n\n`,
-      );
-      return;
-
-    case 'plan':
-      md.appendMarkdown(
-        `**Plan:** ${config.planType === 'api' ? 'API (pay-as-you-go)' : 'Subscription (Pro/Max/Team)'}\n\n`,
+        `**Month-to-date (since ${monthly.periodStartISODate}):** ${formatCost(monthly.totalCostUSD, monthly.known, currency)}\n\n`,
       );
       return;
 

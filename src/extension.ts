@@ -178,8 +178,14 @@ function buildTurnSnapshot(record: UsageRecord): TurnSnapshot {
 
   return {
     model: record.model,
-    modelLabel: stripModelPrefix(record.model),
+    // Use the resolved registry key's clean name (e.g. "haiku-4-5"), not the
+    // raw dated snapshot id (e.g. "haiku-4-5-20251001") — resolveModel()
+    // already matched the id against that key for pricing purposes, so the
+    // display label should reflect the same match rather than showing the
+    // unresolved raw id whenever a date suffix happens to be present.
+    modelLabel: stripModelPrefix(resolved?.key ?? record.model),
     modelUnknown: !resolved,
+    effort: record.effort,
     contextPercent: entry ? contextFillPercent(record.usage, entry.contextWindow) : 0,
     contextTokensUsed: contextTokensUsed(record.usage),
     contextWindow: entry?.contextWindow ?? 0,

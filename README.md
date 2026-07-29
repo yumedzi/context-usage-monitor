@@ -57,15 +57,16 @@ All settings live under `contextUsageMonitor.*`:
 
 | Setting | Default | Description |
 |---|---|---|
-| `planType` | `subscription` | `subscription` shows costs with a `~` (API-equivalent, not a real charge); `api` shows them as actual charges. |
 | `statusBar.enabled` | `true` | Show the status bar item. |
 | `statusBar.alignment` | `right` | `left` or `right`. |
 | `statusBar.priority` | `100` | Higher = further left/right within its alignment. |
-| `statusBar.segments` | `["model","context","cacheHit","turnCost"]` | Ordered list from: `model`, `context`, `contextTokens`, `cacheHit`, `turnCost`, `sessionCost`, `monthlyCost`, `plan`, `idleState`. |
-| `statusBar.separator` | `" \| "` | Separator between segments. |
+| `statusBar.segments` | `["model","context","turnCost"]` | Ordered list from: `model`, `context`, `contextTokens`, `cacheHit`, `turnCost`, `sessionCost`, `idleState`. |
+| `statusBar.separator` | `·` | Just the character — spaces are added automatically around it when rendering. |
 | `statusBar.colorMode` | `none` | `none`, `cacheHit` (warn on low hit rate), or `contextFill` (warn/error as context fills up). |
 | `statusBar.showIcon` | `true` | Show the leading icon. |
-| `tooltip.sections` | all | Ordered list from: `turn`, `context`, `cache`, `cost`, `monthly`, `plan`, `links`. |
+| `statusBar.showEffort` | `true` | Show the reasoning-effort level (low/medium/high) in parentheses after the model name, when Claude Code recorded one. |
+| `statusBar.showMonthlyCost` | `false` | Show month-to-date cost, appended at the end. Renders even while idle — it's a background total, not tied to the current turn. |
+| `tooltip.sections` | all | Ordered list from: `turn`, `context`, `cache`, `cost`, `monthly`, `links`. |
 | `pricing.models` | `{}` | Per-model `input`/`output`/`cacheRead`/`cacheWrite5m`/`cacheWrite1h` ($/token) and `contextWindow` overrides, merged over the built-in defaults. |
 | `pricing.currencySymbol` | `$` | Currency symbol for formatted costs. |
 | `usage.billingCycleStartDay` | `1` | Day of month (1–28) your monthly total resets on. |

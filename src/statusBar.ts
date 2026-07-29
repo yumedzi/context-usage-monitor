@@ -13,7 +13,7 @@ export interface StatusBarRenderResult {
   backgroundColorId: 'errorBackground' | 'warningBackground' | null;
 }
 
-const ICON = '$(pulse) ';
+const ICON = '$(robot) ';
 
 export function renderStatusBar(
   state: MonitorState,
@@ -22,29 +22,53 @@ export function renderStatusBar(
   sessionCost: CostTotal | null,
 ): StatusBarRenderResult {
   const icon = config.statusBar.showIcon ? ICON : '';
+  const sep = paddedSeparator(config.statusBar.separator);
+
+  // Monthly-to-date is a background stat, not tied to the current turn — it
+  // renders in every state (including idle/no-activity) whenever enabled.
+  const monthlyPart = renderMonthlyPart(config, monthly);
 
   if (state.kind === 'no-activity') {
-    return { text: `${icon}Claude: Ready`, backgroundColorId: null };
+    return { text: `${icon}${assembleParts(['Claude: Ready'], monthlyPart, sep)}`, backgroundColorId: null };
   }
   if (state.kind === 'idle') {
-    return { text: `${icon}Claude: Idle`, backgroundColorId: null };
+    return { text: `${icon}${assembleParts(['Claude: Idle'], monthlyPart, sep)}`, backgroundColorId: null };
   }
   if (state.kind === 'off-workspace') {
     const hint = state.otherProjectHint ? ` (${state.otherProjectHint})` : '';
-    return { text: `${icon}Claude: other project${hint}`, backgroundColorId: null };
+    return {
+      text: `${icon}${assembleParts([`Claude: other project${hint}`], monthlyPart, sep)}`,
+      backgroundColorId: null,
+    };
   }
 
   const { turn } = state;
   const parts: string[] = [];
   for (const segment of config.statusBar.segments) {
-    const part = renderSegment(segment, turn, config, monthly, sessionCost);
+    const part = renderSegment(segment, turn, config, sessionCost);
     if (part !== null) parts.push(part);
   }
 
   return {
-    text: `${icon}${parts.join(config.statusBar.separator)}`,
+    text: `${icon}${assembleParts(parts, monthlyPart, sep)}`,
     backgroundColorId: colorFor(turn, config.statusBar.colorMode),
   };
+}
+
+function assembleParts(baseParts: string[], monthlyPart: string | null, sep: string): string {
+  const parts = monthlyPart ? [...baseParts, monthlyPart] : baseParts;
+  return parts.join(sep);
+}
+
+function renderMonthlyPart(config: ExtensionConfig, monthly: MonthlyUsageInfo | null): string | null {
+  if (!config.statusBar.showMonthlyCost || !monthly) return null;
+  return `m:${formatCost(monthly.totalCostUSD, monthly.known, config.pricing.currencySymbol)}`;
+}
+
+/** Users configure just the separator character (e.g. "·"); spaces around it are always added here. */
+function paddedSeparator(separator: string): string {
+  const trimmed = separator.trim();
+  return trimmed ? ` ${trimmed} ` : ' ';
 }
 
 function colorFor(
@@ -66,17 +90,18 @@ function renderSegment(
   segment: StatusBarSegment,
   turn: TurnSnapshot,
   config: ExtensionConfig,
-  monthly: MonthlyUsageInfo | null,
   sessionCost: CostTotal | null,
 ): string | null {
   const currency = config.pricing.currencySymbol;
-  const apiEquivPrefix = config.planType === 'subscription' ? '~' : '';
 
   switch (segment) {
-    case 'model':
-      return turn.modelUnknown ? `${turn.modelLabel} (?)` : turn.modelLabel;
+    case 'model': {
+      if (turn.modelUnknown) return `${turn.modelLabel} (?)`;
+      const effortSuffix = config.statusBar.showEffort && turn.effort ? ` (${turn.effort})` : '';
+      return `${turn.modelLabel}${effortSuffix}`;
+    }
     case 'context':
-      return turn.modelUnknown ? 'Ctx: —' : `Ctx: ${turn.contextPercent}%`;
+      return turn.modelUnknown ? 'ctx: —' : `ctx: ${turn.contextPercent}%`;
     case 'contextTokens':
       return turn.modelUnknown
         ? null
@@ -84,17 +109,9 @@ function renderSegment(
     case 'cacheHit':
       return `Hit: ${turn.cacheHitPercent}%`;
     case 'turnCost':
-      return apiEquivPrefix + formatCost(turn.turnCost, turn.turnCostKnown, currency);
+      return formatCost(turn.turnCost, turn.turnCostKnown, currency);
     case 'sessionCost':
-      return sessionCost
-        ? `Session ${apiEquivPrefix}${formatCost(sessionCost.cost, sessionCost.known, currency)}`
-        : null;
-    case 'monthlyCost':
-      return monthly
-        ? `Month ${apiEquivPrefix}${formatCost(monthly.totalCostUSD, monthly.known, currency)}`
-        : null;
-    case 'plan':
-      return config.planType === 'api' ? 'Plan: API' : 'Plan: Sub';
+      return sessionCost ? `Session ${formatCost(sessionCost.cost, sessionCost.known, currency)}` : null;
     case 'idleState':
       return null;
     default:
