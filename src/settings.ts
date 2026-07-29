@@ -10,7 +10,12 @@ export type StatusBarSegment =
   | 'sessionCost'
   | 'idleState';
 
-export type TooltipSection = 'turn' | 'context' | 'cache' | 'cost' | 'monthly' | 'links';
+export type TooltipSection = 'turn' | 'context' | 'cache' | 'cost' | 'monthly' | 'rateLimits' | 'links';
+
+export interface RateLimitColorThresholds {
+  warning: number;
+  error: number;
+}
 
 export interface ExtensionConfig {
   statusBar: {
@@ -19,7 +24,7 @@ export interface ExtensionConfig {
     priority: number;
     segments: StatusBarSegment[];
     separator: string;
-    colorMode: 'none' | 'cacheHit' | 'contextFill';
+    colorMode: 'none' | 'cacheHit' | 'contextFill' | 'rateLimit';
     showIcon: boolean;
     /** Show reasoning-effort level ("low"/"medium"/"high") in parentheses after the model segment. */
     showEffort: boolean;
@@ -41,6 +46,14 @@ export interface ExtensionConfig {
     includeSidechainsInContext: boolean;
   };
   contextWindowOverrides: Record<string, number>;
+  rateLimits: {
+    /** Shows 5-hour/weekly subscription rate-limit gauges in the status bar. Makes a network request to api.anthropic.com using your existing local Claude Code OAuth token — only when on a subscription plan (never on API-key/Bedrock/Vertex billing), at most once per refreshSeconds per machine. */
+    enabled: boolean;
+    refreshSeconds: number;
+    showWeekly: boolean;
+    showPerModelWeekly: boolean;
+    colorThresholds: RateLimitColorThresholds;
+  };
 }
 
 const CONFIG_SECTION = 'contextUsageMonitor';
@@ -60,7 +73,7 @@ export function readConfig(): ExtensionConfig {
       showMonthlyCost: cfg.get('statusBar.showMonthlyCost', false),
     },
     tooltip: {
-      sections: cfg.get('tooltip.sections', ['turn', 'context', 'cache', 'cost', 'monthly', 'links']),
+      sections: cfg.get('tooltip.sections', ['turn', 'context', 'cache', 'rateLimits', 'cost', 'monthly', 'links']),
     },
     pricing: {
       models: cfg.get('pricing.models', {}),
@@ -74,6 +87,13 @@ export function readConfig(): ExtensionConfig {
       includeSidechainsInContext: cfg.get('filters.includeSidechainsInContext', false),
     },
     contextWindowOverrides: cfg.get('contextWindowOverrides', {}),
+    rateLimits: {
+      enabled: cfg.get('rateLimits.enabled', true),
+      refreshSeconds: cfg.get('rateLimits.refreshSeconds', 120),
+      showWeekly: cfg.get('rateLimits.showWeekly', true),
+      showPerModelWeekly: cfg.get('rateLimits.showPerModelWeekly', false),
+      colorThresholds: cfg.get('rateLimits.colorThresholds', { warning: 80, error: 90 }),
+    },
   };
 }
 

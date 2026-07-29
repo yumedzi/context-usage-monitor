@@ -1,6 +1,29 @@
 # Changelog
 
-## 0.1.0 — Unreleased
+## 0.2.0
+
+- Added 5-hour/weekly subscription rate-limit gauges (`5h:34% · w:53%`) to
+  the status bar, on by default (`rateLimits.enabled`). This reintroduces
+  rate-limit tracking via a different mechanism than the one removed in
+  0.1.0 below: instead of depending on Claude Code's `statusLine` hook (which
+  the VS Code panel doesn't invoke), it calls Anthropic's
+  `/api/oauth/usage` and `/api/oauth/profile` endpoints directly, using the
+  same local OAuth token Claude Code already stores on disk. This works from
+  the panel regardless of whether a terminal session is running. See the
+  README's new **Network access** section for exactly what this sends and
+  when — it's the one part of this extension that isn't fully offline, and
+  it's disclosed and toggleable.
+- Silently hidden on API-key/Bedrock/Vertex/Foundry billing, where 5-hour/
+  weekly limits don't apply.
+- New `statusBar.colorMode: "rateLimit"` background-color policy and
+  `rateLimits.colorThresholds` setting.
+- New tooltip section `rateLimits` (session/weekly percentages, reset
+  countdowns, plan name), and a new **Refresh Rate Limits Now** command.
+- New settings: `rateLimits.enabled`, `rateLimits.refreshSeconds`,
+  `rateLimits.showWeekly`, `rateLimits.showPerModelWeekly`,
+  `rateLimits.colorThresholds`.
+
+## 0.1.0
 
 Initial release.
 

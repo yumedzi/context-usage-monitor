@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { formatCost, formatTokens } from './core/format';
-import { ExtensionConfig, StatusBarSegment } from './settings';
+import { RateLimitSnapshot } from './core/rateLimits';
+import { ExtensionConfig, RateLimitColorThresholds, StatusBarSegment } from './settings';
 import { MonitorState, MonthlyUsageInfo, TurnSnapshot } from './types';
 
 export interface CostTotal {
@@ -20,38 +21,58 @@ export function renderStatusBar(
   config: ExtensionConfig,
   monthly: MonthlyUsageInfo | null,
   sessionCost: CostTotal | null,
+  rates: RateLimitSnapshot | null,
 ): StatusBarRenderResult {
   const icon = config.statusBar.showIcon ? ICON : '';
   const sep = paddedSeparator(config.statusBar.separator);
 
-  // Monthly-to-date is a background stat, not tied to the current turn — it
-  // renders in every state (including idle/no-activity) whenever enabled.
+  // Monthly-to-date and the rate-limit gauges are background stats, not tied
+  // to the current turn — they render in every state (including
+  // idle/no-activity) whenever enabled. A subscription's 5-hour/weekly
+  // windows keep burning down whether or not this workspace has a live turn.
   const monthlyPart = renderMonthlyPart(config, monthly);
+  const rateLimitParts = renderRateLimitParts(config, rates);
+  const colorMode = config.statusBar.colorMode;
+  const thresholds = config.rateLimits.colorThresholds;
 
   if (state.kind === 'no-activity') {
-    return { text: `${icon}${assembleParts(['Claude: Ready'], monthlyPart, sep)}`, backgroundColorId: null };
+    return {
+      text: `${icon}${assembleParts(['Claude: Ready', ...rateLimitParts], monthlyPart, sep)}`,
+      backgroundColorId: colorFor(null, colorMode, rates, thresholds),
+    };
   }
   if (state.kind === 'idle') {
-    return { text: `${icon}${assembleParts(['Claude: Idle'], monthlyPart, sep)}`, backgroundColorId: null };
+    return {
+      text: `${icon}${assembleParts(['Claude: Idle', ...rateLimitParts], monthlyPart, sep)}`,
+      backgroundColorId: colorFor(null, colorMode, rates, thresholds),
+    };
   }
   if (state.kind === 'off-workspace') {
     const hint = state.otherProjectHint ? ` (${state.otherProjectHint})` : '';
     return {
-      text: `${icon}${assembleParts([`Claude: other project${hint}`], monthlyPart, sep)}`,
-      backgroundColorId: null,
+      text: `${icon}${assembleParts([`Claude: other project${hint}`, ...rateLimitParts], monthlyPart, sep)}`,
+      backgroundColorId: colorFor(null, colorMode, rates, thresholds),
     };
   }
 
   const { turn } = state;
   const parts: string[] = [];
+  let costInsertIndex: number | null = null;
   for (const segment of config.statusBar.segments) {
     const part = renderSegment(segment, turn, config, sessionCost);
-    if (part !== null) parts.push(part);
+    if (part === null) continue;
+    if (costInsertIndex === null && (segment === 'turnCost' || segment === 'sessionCost')) {
+      costInsertIndex = parts.length;
+    }
+    parts.push(part);
+  }
+  if (rateLimitParts.length > 0) {
+    parts.splice(costInsertIndex ?? parts.length, 0, ...rateLimitParts);
   }
 
   return {
     text: `${icon}${assembleParts(parts, monthlyPart, sep)}`,
-    backgroundColorId: colorFor(turn, config.statusBar.colorMode),
+    backgroundColorId: colorFor(turn, colorMode, rates, thresholds),
   };
 }
 
@@ -65,6 +86,25 @@ function renderMonthlyPart(config: ExtensionConfig, monthly: MonthlyUsageInfo | 
   return `m:${formatCost(monthly.totalCostUSD, monthly.known, config.pricing.currencySymbol)}`;
 }
 
+/**
+ * Renders the subscription rate-limit gauges (e.g. "5h:34%", "w:53%") as
+ * separate parts so the caller can splice them individually into the
+ * segment list, each getting its own separator like any other segment.
+ * Returns an empty array (never a guessed number) whenever the toggle is
+ * off, no snapshot is available yet, or billing isn't a subscription — the
+ * feature only means anything on Pro/Max/Team, never on API-key/Bedrock/
+ * Vertex/Foundry billing.
+ */
+function renderRateLimitParts(config: ExtensionConfig, rates: RateLimitSnapshot | null): string[] {
+  if (!config.rateLimits.enabled || !rates || rates.billingMode !== 'subscription') return [];
+
+  const parts: string[] = [];
+  const staleMark = rates.stale ? '~' : '';
+  if (rates.fiveHour) parts.push(`5h:${rates.fiveHour.percent}%${staleMark}`);
+  if (config.rateLimits.showWeekly && rates.sevenDay) parts.push(`w:${rates.sevenDay.percent}%${staleMark}`);
+  return parts;
+}
+
 /** Users configure just the separator character (e.g. "·"); spaces around it are always added here. */
 function paddedSeparator(separator: string): string {
   const trimmed = separator.trim();
@@ -72,9 +112,15 @@ function paddedSeparator(separator: string): string {
 }
 
 function colorFor(
-  turn: TurnSnapshot,
+  turn: TurnSnapshot | null,
   colorMode: ExtensionConfig['statusBar']['colorMode'],
+  rates: RateLimitSnapshot | null,
+  rateThresholds: RateLimitColorThresholds,
 ): 'errorBackground' | 'warningBackground' | null {
+  if (colorMode === 'rateLimit') {
+    return colorForRateLimit(rates, rateThresholds);
+  }
+  if (!turn) return null;
   if (colorMode === 'cacheHit') {
     return turn.cacheHitPercent < 20 ? 'warningBackground' : null;
   }
@@ -83,6 +129,17 @@ function colorFor(
     if (turn.contextPercent >= 75) return 'warningBackground';
     return null;
   }
+  return null;
+}
+
+function colorForRateLimit(
+  rates: RateLimitSnapshot | null,
+  thresholds: RateLimitColorThresholds,
+): 'errorBackground' | 'warningBackground' | null {
+  if (!rates || rates.billingMode !== 'subscription') return null;
+  const max = Math.max(rates.fiveHour?.percent ?? 0, rates.sevenDay?.percent ?? 0);
+  if (max >= thresholds.error) return 'errorBackground';
+  if (max >= thresholds.warning) return 'warningBackground';
   return null;
 }
 
@@ -133,6 +190,7 @@ export class StatusBarController implements vscode.Disposable {
     config: ExtensionConfig,
     monthly: MonthlyUsageInfo | null,
     sessionCost: CostTotal | null,
+    rates: RateLimitSnapshot | null,
     tooltip: vscode.MarkdownString,
   ): void {
     if (!config.statusBar.enabled) {
@@ -151,7 +209,7 @@ export class StatusBarController implements vscode.Disposable {
       );
     }
 
-    const rendered = renderStatusBar(state, config, monthly, sessionCost);
+    const rendered = renderStatusBar(state, config, monthly, sessionCost, rates);
     this.item.text = rendered.text;
     this.item.tooltip = tooltip;
     this.item.command = 'contextUsageMonitor.showReport';

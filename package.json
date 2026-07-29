@@ -2,7 +2,7 @@
   "name": "context-usage-monitor",
   "displayName": "Context and Usage Monitor for Claude Code",
   "description": "Status bar monitor for Claude Code: correct context-window %, cache hit rate, per-turn and monthly cost. Not affiliated with Anthropic.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "viktor-moyseyenko",
   "license": "MIT",
   "engines": {
@@ -54,6 +54,10 @@
       {
         "command": "contextUsageMonitor.copyDiagnostics",
         "title": "Context and Usage Monitor: Copy Diagnostics"
+      },
+      {
+        "command": "contextUsageMonitor.refreshRateLimits",
+        "title": "Context and Usage Monitor: Refresh Rate Limits Now"
       }
     ],
     "configuration": {
@@ -91,9 +95,9 @@
         },
         "contextUsageMonitor.statusBar.colorMode": {
           "type": "string",
-          "enum": ["none", "cacheHit", "contextFill"],
+          "enum": ["none", "cacheHit", "contextFill", "rateLimit"],
           "default": "none",
-          "description": "Background color policy for the status bar item. 'none' keeps the default theme background."
+          "description": "Background color policy for the status bar item. 'none' keeps the default theme background. 'rateLimit' warns/errors as your 5-hour or weekly subscription usage climbs."
         },
         "contextUsageMonitor.statusBar.showIcon": {
           "type": "boolean",
@@ -114,9 +118,9 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["turn", "context", "cache", "cost", "monthly", "links"]
+            "enum": ["turn", "context", "cache", "rateLimits", "cost", "monthly", "links"]
           },
-          "default": ["turn", "context", "cache", "cost", "monthly", "links"],
+          "default": ["turn", "context", "cache", "rateLimits", "cost", "monthly", "links"],
           "description": "Which sections to show in the hover tooltip, in order."
         },
         "contextUsageMonitor.pricing.models": {
@@ -161,6 +165,37 @@
           "type": "object",
           "default": {},
           "description": "Per-model context window overrides (tokens), keyed by model id. Shortcut for pricing.models.<id>.contextWindow."
+        },
+        "contextUsageMonitor.rateLimits.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show 5-hour/weekly subscription rate-limit gauges (e.g. '5h:34% · w:53%') in the status bar. Makes a network request to api.anthropic.com using your existing local Claude Code OAuth token (the same one Claude Code itself uses) — only when you're on a subscription plan; never on API-key/Bedrock/Vertex/Foundry billing, where it's silently hidden. At most one request per refreshSeconds per machine, shared across all open VS Code windows."
+        },
+        "contextUsageMonitor.rateLimits.refreshSeconds": {
+          "type": "number",
+          "default": 120,
+          "minimum": 30,
+          "maximum": 3600,
+          "description": "How often the 5-hour/weekly rate-limit gauges refresh from the network, in seconds. Raise it if you have many windows open and see rate-limit errors on the fetch itself."
+        },
+        "contextUsageMonitor.rateLimits.showWeekly": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the weekly ('w:') rate-limit gauge alongside the 5-hour one."
+        },
+        "contextUsageMonitor.rateLimits.showPerModelWeekly": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show per-model weekly gauges (Opus/Sonnet) in the tooltip when your plan reports them (Max plans only; always empty on Pro)."
+        },
+        "contextUsageMonitor.rateLimits.colorThresholds": {
+          "type": "object",
+          "default": { "warning": 80, "error": 90 },
+          "description": "Warning/error percentage thresholds for statusBar.colorMode: 'rateLimit', based on the higher of the 5-hour and weekly utilization.",
+          "properties": {
+            "warning": { "type": "number" },
+            "error": { "type": "number" }
+          }
         }
       }
     }

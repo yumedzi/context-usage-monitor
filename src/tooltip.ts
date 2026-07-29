@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { formatCost, formatTokens } from './core/format';
+import { formatCountdown, RateLimitSnapshot } from './core/rateLimits';
 import { ExtensionConfig, TooltipSection } from './settings';
 import { MonitorState, MonthlyUsageInfo, TurnSnapshot, WorkspaceDiagnostics } from './types';
 import { CostTotal } from './statusBar';
@@ -11,6 +12,7 @@ export function buildTooltip(
   config: ExtensionConfig,
   monthly: MonthlyUsageInfo | null,
   sessionCost: CostTotal | null,
+  rates: RateLimitSnapshot | null,
   diagnostics: WorkspaceDiagnostics | null,
 ): vscode.MarkdownString {
   const md = new vscode.MarkdownString(undefined, true);
@@ -33,10 +35,56 @@ export function buildTooltip(
   const turn = state.kind === 'active' ? state.turn : null;
 
   for (const section of config.tooltip.sections) {
-    appendSection(md, section, turn, config, monthly, sessionCost, diagnostics);
+    appendSection(md, section, turn, config, monthly, sessionCost, rates, diagnostics);
   }
 
   return md;
+}
+
+const PLAN_DISPLAY_NAMES: Record<string, string> = {
+  pro: 'Claude Pro',
+  max: 'Claude Max',
+  team: 'Claude Team',
+  enterprise: 'Claude Enterprise',
+};
+
+function planDisplayName(label: string | null): string | null {
+  if (!label) return null;
+  return PLAN_DISPLAY_NAMES[label] ?? `Claude (${label})`;
+}
+
+function appendRateLimitsSection(md: vscode.MarkdownString, config: ExtensionConfig, rates: RateLimitSnapshot | null): void {
+  if (!config.rateLimits.enabled) return;
+
+  if (!rates) {
+    md.appendMarkdown('**Rate limits:** loading…\n\n');
+    return;
+  }
+  if (rates.billingMode === 'api') {
+    md.appendMarkdown("**Rate limits:** API key / Bedrock / Vertex / Foundry billing detected — subscription rate limits don't apply.\n\n");
+    return;
+  }
+  if (rates.billingMode === 'unknown') {
+    md.appendMarkdown('**Rate limits:** Not signed in to a Claude subscription — sign in with `claude login`.\n\n');
+    return;
+  }
+
+  const now = new Date();
+  if (rates.fiveHour) {
+    const reset = rates.fiveHour.resetsAt ? ` — resets in ${formatCountdown(rates.fiveHour.resetsAt, now)}` : '';
+    md.appendMarkdown(`**Session (5h):** ${rates.fiveHour.percent}%${reset}\n\n`);
+  }
+  if (config.rateLimits.showWeekly && rates.sevenDay) {
+    const reset = rates.sevenDay.resetsAt ? ` — resets in ${formatCountdown(rates.sevenDay.resetsAt, now)}` : '';
+    md.appendMarkdown(`**Weekly:** ${rates.sevenDay.percent}%${reset}\n\n`);
+  }
+  if (config.rateLimits.showPerModelWeekly) {
+    if (rates.sevenDayOpus) md.appendMarkdown(`**Weekly (Opus):** ${rates.sevenDayOpus.percent}%\n\n`);
+    if (rates.sevenDaySonnet) md.appendMarkdown(`**Weekly (Sonnet):** ${rates.sevenDaySonnet.percent}%\n\n`);
+  }
+  const planName = planDisplayName(rates.planLabel);
+  if (planName) md.appendMarkdown(`**Plan:** ${planName}\n\n`);
+  if (rates.stale) md.appendMarkdown('_(showing last known values — refresh failed)_\n\n');
 }
 
 function appendSection(
@@ -46,6 +94,7 @@ function appendSection(
   config: ExtensionConfig,
   monthly: MonthlyUsageInfo | null,
   sessionCost: CostTotal | null,
+  rates: RateLimitSnapshot | null,
   diagnostics: WorkspaceDiagnostics | null,
 ): void {
   const currency = config.pricing.currencySymbol;
@@ -82,6 +131,10 @@ function appendSection(
       );
       return;
 
+    case 'rateLimits':
+      appendRateLimitsSection(md, config, rates);
+      return;
+
     case 'cost':
       if (!turn) return;
       md.appendMarkdown(`**Turn cost:** ${formatCost(turn.turnCost, turn.turnCostKnown, currency)}\n\n`);
@@ -101,6 +154,7 @@ function appendSection(
       md.appendMarkdown(
         `[Open pricing page](${PRICING_URL}) · ` +
           `[Show usage report](command:contextUsageMonitor.showReport) · ` +
+          `[Refresh rate limits](command:contextUsageMonitor.refreshRateLimits) · ` +
           `[Copy diagnostics](command:contextUsageMonitor.copyDiagnostics)\n\n`,
       );
       if (diagnostics) {

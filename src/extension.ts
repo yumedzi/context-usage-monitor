@@ -1,13 +1,15 @@
 import * as vscode from 'vscode';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
-import * as os from 'node:os';
 
 import { resolveModel } from './core/resolve';
 import { computeTurnCost, contextFillPercent, contextTokensUsed, cacheHitRatePercent } from './core/pricing';
 import { parseUsageLine, UsageRecord } from './core/transcript';
 import { encodeProjectDirName, cwdMatchesWorkspace } from './core/workspace';
 import { computeMonthlyUsage, MonthlyUsageCache } from './core/usage';
+import { claudeConfigDir } from './core/credentials';
+import { RateLimitSnapshot } from './core/rateLimits';
+import { fetchRateLimits, readCacheMeta } from './core/usageApi';
 import { ExtensionConfig, readConfig, buildRegistry } from './settings';
 import { StatusBarController, CostTotal } from './statusBar';
 import { buildTooltip } from './tooltip';
@@ -19,8 +21,10 @@ const MONTHLY_REFRESH_MS = 60_000;
 const IDLE_THRESHOLD_MS = 10 * 60 * 1000;
 const PRICING_URL = 'https://www.claude.com/pricing#api';
 const MONTHLY_CACHE_KEY = 'contextUsageMonitor.monthlyCache';
+const RATE_LIMIT_REFRESH_MIN_SECONDS = 30;
+const RATE_LIMIT_REFRESH_MAX_SECONDS = 3600;
 
-const projectsDir = path.join(os.homedir(), '.claude', 'projects');
+const projectsDir = path.join(claudeConfigDir(), 'projects');
 
 let config: ExtensionConfig = readConfig();
 let registry: Record<string, ModelPricing> = buildRegistry(config);
@@ -32,7 +36,9 @@ let currentState: MonitorState = { kind: 'no-activity' };
 let currentSessionCost: CostTotal | null = null;
 let currentDiagnostics: WorkspaceDiagnostics | null = null;
 let currentMonthly: MonthlyUsageInfo | null = null;
+let currentRates: RateLimitSnapshot | null = null;
 let monthlyCache: MonthlyUsageCache | undefined;
+let rateTimer: ReturnType<typeof setInterval> | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
   extContext = context;
@@ -46,7 +52,13 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!e.affectsConfiguration('contextUsageMonitor')) return;
       config = readConfig();
       registry = buildRegistry(config);
-      render();
+      startRateTimer();
+      if (config.rateLimits.enabled) {
+        void refreshRateLimits();
+      } else {
+        currentRates = null;
+        render();
+      }
     }),
   );
 
@@ -61,6 +73,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('contextUsageMonitor.recalculateMonthly', recalculateMonthly),
     vscode.commands.registerCommand('contextUsageMonitor.openPricingPage', openPricingPage),
     vscode.commands.registerCommand('contextUsageMonitor.copyDiagnostics', copyDiagnostics),
+    vscode.commands.registerCommand('contextUsageMonitor.refreshRateLimits', () => refreshRateLimits(true)),
   );
 
   const turnTimer = setInterval(() => void refreshTurn(), TURN_REFRESH_MS);
@@ -69,11 +82,14 @@ export function activate(context: vscode.ExtensionContext): void {
     dispose: () => {
       clearInterval(turnTimer);
       clearInterval(monthlyTimer);
+      stopRateTimer();
     },
   });
 
   void refreshTurn();
   void refreshMonthly();
+  startRateTimer();
+  void refreshRateLimits();
 }
 
 export function deactivate(): void {
@@ -314,12 +330,49 @@ async function refreshMonthly(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Rate-limit refresh: 5-hour/weekly subscription gauges, fetched from
+// Anthropic's OAuth usage API (see core/usageApi.ts). Only makes a network
+// call when on subscription billing; silently a no-op otherwise.
+// ---------------------------------------------------------------------------
+
+function clampRefreshSeconds(seconds: number): number {
+  return Math.min(Math.max(seconds, RATE_LIMIT_REFRESH_MIN_SECONDS), RATE_LIMIT_REFRESH_MAX_SECONDS);
+}
+
+function startRateTimer(): void {
+  stopRateTimer();
+  if (!config.rateLimits.enabled) return;
+  const seconds = clampRefreshSeconds(config.rateLimits.refreshSeconds);
+  rateTimer = setInterval(() => void refreshRateLimits(), seconds * 1000);
+}
+
+function stopRateTimer(): void {
+  if (rateTimer) {
+    clearInterval(rateTimer);
+    rateTimer = undefined;
+  }
+}
+
+async function refreshRateLimits(force = false): Promise<void> {
+  if (!config.rateLimits.enabled) {
+    currentRates = null;
+    render();
+    return;
+  }
+  currentRates = await fetchRateLimits({
+    ttlMs: clampRefreshSeconds(config.rateLimits.refreshSeconds) * 1000,
+    force,
+  });
+  render();
+}
+
+// ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
 
 function render(): void {
-  const tooltip = buildTooltip(currentState, config, currentMonthly, currentSessionCost, currentDiagnostics);
-  statusBar.update(currentState, config, currentMonthly, currentSessionCost, tooltip);
+  const tooltip = buildTooltip(currentState, config, currentMonthly, currentSessionCost, currentRates, currentDiagnostics);
+  statusBar.update(currentState, config, currentMonthly, currentSessionCost, currentRates, tooltip);
 }
 
 // ---------------------------------------------------------------------------
@@ -327,7 +380,7 @@ function render(): void {
 // ---------------------------------------------------------------------------
 
 async function showReport(): Promise<void> {
-  const tooltip = buildTooltip(currentState, config, currentMonthly, currentSessionCost, currentDiagnostics);
+  const tooltip = buildTooltip(currentState, config, currentMonthly, currentSessionCost, currentRates, currentDiagnostics);
   const doc = await vscode.workspace.openTextDocument({ content: tooltip.value, language: 'markdown' });
   await vscode.window.showTextDocument(doc, { preview: true });
 }
@@ -345,6 +398,8 @@ async function openPricingPage(): Promise<void> {
 
 async function copyDiagnostics(): Promise<void> {
   const d = currentDiagnostics;
+  const rateMeta = await readCacheMeta();
+  const rateAgeMs = currentRates ? Date.now() - currentRates.fetchedAt : null;
   const lines = [
     '# Context and Usage Monitor — Diagnostics',
     `workspacePath: ${d?.workspacePath ?? '(none)'}`,
@@ -356,6 +411,13 @@ async function copyDiagnostics(): Promise<void> {
     `sessionId: ${d?.sessionId ?? '(none)'}`,
     `state: ${currentState.kind}`,
     currentState.kind === 'active' ? `model: ${currentState.turn.model} (resolved: ${!currentState.turn.modelUnknown})` : '',
+    `rateLimits.enabled: ${config.rateLimits.enabled}`,
+    `rateLimits.billingMode: ${currentRates?.billingMode ?? '(none)'}`,
+    `rateLimits.planLabel: ${currentRates?.planLabel ?? '(none)'}`,
+    `rateLimits.tokenSource: ${rateMeta?.tokenSource ?? '(none)'}`,
+    `rateLimits.snapshotAgeMs: ${rateAgeMs ?? '(none)'}`,
+    `rateLimits.stale: ${currentRates?.stale ?? false}`,
+    `rateLimits.lastErrorReason: ${rateMeta?.lastErrorReason ?? '(none)'}`,
   ].filter(Boolean);
   await vscode.env.clipboard.writeText(lines.join('\n'));
   void vscode.window.showInformationMessage('Context and Usage Monitor: diagnostics copied to clipboard.');
