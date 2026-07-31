@@ -2,7 +2,7 @@
   "name": "context-usage-monitor",
   "displayName": "Context and Usage Monitor for Claude Code",
   "description": "Status bar monitor for Claude Code: correct context-window %, cache hit rate, per-turn and monthly cost. Not affiliated with Anthropic.",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "publisher": "viktor-moyseyenko",
   "license": "MIT",
   "engines": {
