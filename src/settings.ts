@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { DEFAULT_MODEL_REGISTRY, ModelPricing } from './core/models';
+import { DEFAULT_MODEL_REGISTRY, ModelPricing, PricingOverride, applyPricingOverride } from './core/models';
+import { DEFAULT_MODEL_PATTERN } from './core/resolve';
 
 export type StatusBarSegment =
   | 'model'
@@ -35,11 +36,13 @@ export interface ExtensionConfig {
     sections: TooltipSection[];
   };
   pricing: {
-    models: Record<string, Partial<ModelPricing>>;
+    models: Record<string, PricingOverride>;
     currencySymbol: string;
   };
   usage: {
     billingCycleStartDay: number;
+    /** Clock the billing period boundary (midnight on the start day) is measured on. */
+    billingCycleTimeZone: 'local' | 'utc';
   };
   filters: {
     modelPattern: string;
@@ -84,9 +87,10 @@ export function readConfig(): ExtensionConfig {
     },
     usage: {
       billingCycleStartDay: cfg.get('usage.billingCycleStartDay', 1),
+      billingCycleTimeZone: cfg.get<string>('usage.billingCycleTimeZone', 'local') === 'utc' ? 'utc' : 'local',
     },
     filters: {
-      modelPattern: cfg.get('filters.modelPattern', '^claude-'),
+      modelPattern: cfg.get('filters.modelPattern', DEFAULT_MODEL_PATTERN),
       includeSidechainsInContext: cfg.get('filters.includeSidechainsInContext', false),
     },
     contextWindowOverrides: cfg.get('contextWindowOverrides', {}),
@@ -104,7 +108,8 @@ export function readConfig(): ExtensionConfig {
 /**
  * Build the effective model registry: built-in defaults, deep-merged with
  * user overrides from `pricing.models` (per-field, so a user can override
- * just `contextWindow` without having to restate pricing), then the
+ * just `contextWindow` without having to restate pricing; see
+ * applyPricingOverride for how cache rates follow an overridden input price), then the
  * `contextWindowOverrides` shortcut applied last.
  */
 export function buildRegistry(config: ExtensionConfig): Record<string, ModelPricing> {
@@ -115,16 +120,12 @@ export function buildRegistry(config: ExtensionConfig): Record<string, ModelPric
   }
 
   for (const [id, override] of Object.entries(config.pricing.models)) {
-    registry[id] = { ...(registry[id] ?? blankPricing()), ...override };
+    registry[id] = applyPricingOverride(registry[id], override);
   }
 
   for (const [id, contextWindow] of Object.entries(config.contextWindowOverrides)) {
-    registry[id] = { ...(registry[id] ?? blankPricing()), contextWindow };
+    registry[id] = applyPricingOverride(registry[id], { contextWindow });
   }
 
   return registry;
-}
-
-function blankPricing(): ModelPricing {
-  return { input: 0, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0, contextWindow: 200_000 };
 }

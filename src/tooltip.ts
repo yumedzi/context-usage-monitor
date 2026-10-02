@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { formatCost, formatTokens } from './core/format';
+import { formatCost, formatCostPartial, formatTokens } from './core/format';
 import { formatCountdown, RateLimitSnapshot } from './core/rateLimits';
 import { ExtensionConfig, TooltipSection } from './settings';
 import { MonitorState, MonthlyUsageInfo, TurnSnapshot, WorkspaceDiagnostics } from './types';
@@ -39,6 +39,12 @@ export function buildTooltip(
   }
 
   return md;
+}
+
+function modelIdList(ids: string[]): string {
+  const shown = ids.slice(0, 5).map((id) => `\`${id}\``);
+  const more = ids.length > 5 ? ` and ${ids.length - 5} more` : '';
+  return shown.join(', ') + more;
 }
 
 const PLAN_DISPLAY_NAMES: Record<string, string> = {
@@ -139,15 +145,29 @@ function appendSection(
       if (!turn) return;
       md.appendMarkdown(`**Turn cost:** ${formatCost(turn.turnCost, turn.turnCostKnown, currency)}\n\n`);
       if (sessionCost) {
-        md.appendMarkdown(`**Session cost:** ${formatCost(sessionCost.cost, sessionCost.known, currency)}\n\n`);
+        md.appendMarkdown(
+          `**Session cost:** ${formatCostPartial(sessionCost.cost, sessionCost.known, sessionCost.partial ?? false, currency)}\n\n`,
+        );
+        const unknownSession = Object.keys(sessionCost.unknownModels ?? {});
+        if (sessionCost.partial && unknownSession.length > 0) {
+          md.appendMarkdown(`<sub>excludes unrecognized models: ${modelIdList(unknownSession)}</sub>\n\n`);
+        }
       }
       return;
 
     case 'monthly':
       if (!monthly) return;
       md.appendMarkdown(
-        `**Month-to-date (since ${monthly.periodStartISODate}):** ${formatCost(monthly.totalCostUSD, monthly.known, currency)}\n\n`,
+        `**Month-to-date (local estimate, list price):** ${formatCostPartial(monthly.totalCostUSD, monthly.known, monthly.partial, currency)}` +
+          ` _(since ${monthly.periodStartISODate}${monthly.timeZone === 'utc' ? ' (UTC)' : ''})_\n\n`,
       );
+      if (monthly.partial) {
+        const ids = Object.keys(monthly.unknownModels);
+        const turns = Object.values(monthly.unknownModels).reduce((a, b) => a + b.records, 0);
+        md.appendMarkdown(
+          `<sub>${turns} turns from unrecognized models excluded: ${modelIdList(ids)} — add them via \`contextUsageMonitor.pricing.models\`.</sub>\n\n`,
+        );
+      }
       return;
 
     case 'links':

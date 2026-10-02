@@ -29,6 +29,11 @@ interface RawUsage {
     ephemeral_5m_input_tokens?: number;
     ephemeral_1h_input_tokens?: number;
   };
+  speed?: string;
+  inference_geo?: string;
+  server_tool_use?: {
+    web_search_requests?: number;
+  };
 }
 
 interface RawLine {
@@ -64,6 +69,10 @@ function toTurnUsage(raw: RawUsage): TurnUsage {
     cacheReadTokens: raw.cache_read_input_tokens ?? 0,
     cacheWrite5mTokens: cacheWrite5m,
     cacheWrite1hTokens: cacheWrite1h,
+    speed: typeof raw.speed === 'string' ? raw.speed : null,
+    inferenceGeo: typeof raw.inference_geo === 'string' ? raw.inference_geo : null,
+    webSearchRequests:
+      typeof raw.server_tool_use?.web_search_requests === 'number' ? raw.server_tool_use.web_search_requests : 0,
   };
 }
 
@@ -75,7 +84,7 @@ function toTurnUsage(raw: RawUsage): TurnUsage {
  *  - not JSON / wrong `type` / no usage payload
  *  - `isApiErrorMessage: true`
  *  - model id that doesn't match the configured filter pattern (default
- *    `^claude-`) — this is what excludes Claude Code's own `<synthetic>`
+ *    accepts `claude-…` incl. Bedrock-style prefixes) — this is what excludes Claude Code's own `<synthetic>`
  *    zero-token bookkeeping records, which otherwise tanked the cache-hit
  *    reading to 0% and painted the status bar red/black.
  *  - all-zero usage (defensive: covers any other zero-token synthetic shape)

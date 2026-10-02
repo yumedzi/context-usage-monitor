@@ -6,7 +6,8 @@ import { resolveModel } from './core/resolve';
 import { computeTurnCost, contextFillPercent, contextTokensUsed, cacheHitRatePercent } from './core/pricing';
 import { parseUsageLine, UsageRecord } from './core/transcript';
 import { encodeProjectDirName, cwdMatchesWorkspace } from './core/workspace';
-import { computeMonthlyUsage, MonthlyUsageCache } from './core/usage';
+import { computeMonthlyUsage, computeSessionCost, isCurrentCache, MonthlyUsageCache } from './core/usage';
+import { monthlyBreakdownLines } from './core/format';
 import { claudeConfigDir } from './core/credentials';
 import { RateLimitSnapshot } from './core/rateLimits';
 import { fetchRateLimits, readCacheMeta } from './core/usageApi';
@@ -49,7 +50,11 @@ let rateLimitBaselineSet = false;
 export function activate(context: vscode.ExtensionContext): void {
   extContext = context;
   statusBar = new StatusBarController();
-  monthlyCache = context.globalState.get<MonthlyUsageCache>(MONTHLY_CACHE_KEY);
+  const storedCache = context.globalState.get<MonthlyUsageCache>(MONTHLY_CACHE_KEY);
+  // Caches written by an older cache-format version hold costs priced with the
+  // old registry — discard them and rescan from the transcripts.
+  monthlyCache = isCurrentCache(storedCache) ? storedCache : undefined;
+  if (storedCache && !monthlyCache) void context.globalState.update(MONTHLY_CACHE_KEY, undefined);
 
   context.subscriptions.push(statusBar);
 
@@ -58,6 +63,7 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!e.affectsConfiguration('contextUsageMonitor')) return;
       config = readConfig();
       registry = buildRegistry(config);
+      void refreshMonthly();
       startRateTimer();
       if (config.rateLimits.enabled) {
         void refreshRateLimits();
@@ -165,7 +171,7 @@ async function refreshTurn(): Promise<void> {
     sessionId: mainRecord?.sessionId ?? null,
   };
 
-  currentSessionCost = computeSessionCost(lines, opts);
+  currentSessionCost = buildSessionCost(lines, opts);
 
   if (!mainRecord) {
     currentState = { kind: 'no-activity' };
@@ -226,26 +232,12 @@ function buildTurnSnapshot(record: UsageRecord): TurnSnapshot {
 }
 
 function stripModelPrefix(modelId: string): string {
-  return modelId.replace(/^claude-/, '');
+  return modelId.replace(/^(?:(?:us|eu|apac|global)\.)?(?:anthropic\.)?claude-/, '');
 }
 
-function computeSessionCost(lines: string[], opts: { modelPattern: string }): CostTotal {
-  const seen = new Set<string>();
-  let total = 0;
-  for (const line of lines) {
-    const record = parseUsageLine(line, opts);
-    if (!record) continue;
-    const key = record.messageId || record.requestId ? `${record.messageId ?? ''}::${record.requestId ?? ''}` : null;
-    if (key) {
-      if (seen.has(key)) continue;
-      seen.add(key);
-    }
-    const resolved = resolveModel(registry, record.model);
-    if (!resolved) continue;
-    const { cost, known } = computeTurnCost(record.usage, resolved.entry, record.timestamp ?? new Date().toISOString());
-    if (known) total += cost;
-  }
-  return { cost: total, known: true };
+function buildSessionCost(lines: string[], opts: { modelPattern: string }): CostTotal {
+  const result = computeSessionCost(lines, { ...opts, registry });
+  return { cost: result.cost, known: true, partial: result.partial, unknownModels: result.unknownModels };
 }
 
 interface LocatedTranscript {
@@ -326,12 +318,17 @@ async function refreshMonthly(): Promise<void> {
     registry,
     modelPattern: config.filters.modelPattern,
     billingCycleStartDay: config.usage.billingCycleStartDay,
+    billingCycleTimeZone: config.usage.billingCycleTimeZone,
   });
   monthlyCache = result.cache;
   currentMonthly = {
     totalCostUSD: result.totalCostUSD,
     periodStartISODate: result.cache.billingPeriodStart,
     known: true,
+    partial: result.partial,
+    perModel: result.perModel,
+    unknownModels: result.unknownModels,
+    timeZone: config.usage.billingCycleTimeZone,
   };
   await extContext.globalState.update(MONTHLY_CACHE_KEY, monthlyCache);
   render();
@@ -429,7 +426,16 @@ function render(): void {
 
 async function showReport(): Promise<void> {
   const tooltip = buildTooltip(currentState, config, currentMonthly, currentSessionCost, currentRates, currentDiagnostics);
-  const doc = await vscode.workspace.openTextDocument({ content: tooltip.value, language: 'markdown' });
+  let content = tooltip.value;
+  if (currentMonthly) {
+    const tzNote = currentMonthly.timeZone === 'utc' ? ' (UTC)' : '';
+    content +=
+      `\n\n## Month-to-date by model (since ${currentMonthly.periodStartISODate}${tzNote})\n\n` +
+      'Local estimate at Anthropic list prices — not your bill. Compare model by model against your gateway/billing report.\n\n' +
+      (monthlyBreakdownLines(currentMonthly, config.pricing.currencySymbol).join('\n') || '_no usage in this period_') +
+      '\n';
+  }
+  const doc = await vscode.workspace.openTextDocument({ content, language: 'markdown' });
   await vscode.window.showTextDocument(doc, { preview: true });
 }
 
@@ -467,6 +473,12 @@ async function copyDiagnostics(): Promise<void> {
     `rateLimits.snapshotAgeMs: ${rateAgeMs ?? '(none)'}`,
     `rateLimits.stale: ${currentRates?.stale ?? false}`,
     `rateLimits.lastErrorReason: ${rateMeta?.lastErrorReason ?? '(none)'}`,
+    `usage.billingCycleTimeZone: ${config.usage.billingCycleTimeZone}`,
+    `monthly.periodStart: ${currentMonthly?.periodStartISODate ?? '(none)'}`,
+    `monthly.totalCostUSD: ${currentMonthly ? currentMonthly.totalCostUSD.toFixed(4) : '(none)'}${currentMonthly?.partial ? ' (partial: lower bound)' : ''}`,
+    ...(currentMonthly
+      ? ['monthly.byModel:', ...monthlyBreakdownLines(currentMonthly, config.pricing.currencySymbol)]
+      : []),
   ].filter(Boolean);
   await vscode.env.clipboard.writeText(lines.join('\n'));
   void vscode.window.showInformationMessage('Context and Usage Monitor: diagnostics copied to clipboard.');

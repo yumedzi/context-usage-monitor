@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.4.0
+
+Pricing-accuracy release: fixes cases where month-to-date cost disagreed with
+a gateway/billing report because of this extension's own stale registry and
+over-eager model matching.
+
+- **Resolver no longer guesses.** A prefix match is accepted only when the
+  rest of the id is a snapshot/variant suffix (`-YYYYMMDD`, `@YYYYMMDD`,
+  `-v1:0`, `[1m]`). Previously `claude-opus-5-5` was priced as
+  `claude-opus-5`, `claude-sonnet-5-5` as `claude-sonnet-5`, and
+  `claude-fable-5-1` as `claude-fable-5` (wrong input/output rates and up to
+  4x on cache reads). Bedrock-style ids (`anthropic.`, `us.anthropic.`,
+  `eu.`/`apac.`/`global.anthropic.`) are accepted and resolved after
+  stripping the provider prefix; the default `filters.modelPattern` was
+  widened accordingly.
+- **Registry updated** (snapshot 2026-10-02): added Fable 5.1 / Mythos 5.1,
+  Opus 5.5, Sonnet 5.5, Claude 3.5 Haiku; fixed Opus 4.1 / 4.0 ($15/$75,
+  200K context); Sonnet 5 is a permanent $2/$10 (the "$3/$15 after
+  2026-08-31" intro schedule was wrong and is removed). Cache-read rate is
+  now per model (Opus 5.5 0.05x, Fable/Mythos 5.1 0.025x, others 0.1x).
+- **Fast mode, data residency, web search.** `usage.speed: "fast"` bills 2x
+  on Opus 5.5 / 5 / 4.8; `usage.inference_geo: "us"` adds 1.1x; web search
+  requests are added at $0.01 each.
+- **Unknown models are visible.** Models that pass the filter but aren't in
+  the registry are no longer silently dropped from a total that claimed to be
+  complete: month-to-date and session cost render as `≥ $X`, and the tooltip
+  lists the unrecognized ids.
+- **Per-model month-to-date breakdown** in Show Usage Report and Copy
+  Diagnostics.
+- **New setting `usage.billingCycleTimeZone`** (`local` default | `utc`).
+- `pricing.models` accepts per-MTok fields (`inputPerMTok`, `cacheReadPerMTok`,
+  ...) and `fastMultiplier`; overriding `input` re-derives cache rates instead
+  of leaving them stale (or free for new models).
+- Monthly cache: versioned (old caches are discarded and rescanned on
+  upgrade), invalidated when the pricing registry/model filter/time zone
+  changes (so adding a missing model takes effect immediately), records
+  without ids get a stable key, and a record shared by two transcript files
+  survives deletion of the file that first contributed it.
+- Tooltip label is now "Month-to-date (local estimate, list price)". New
+  README section "Why this may not match your bill or gateway".
+
 ## 0.3.0
 
 - The rate-limit gauges now refresh **the moment a new Claude Code turn is

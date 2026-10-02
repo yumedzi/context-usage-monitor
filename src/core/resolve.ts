@@ -1,6 +1,22 @@
 import { ModelPricing } from './models';
 
 /**
+ * Default `filters.modelPattern`: Claude model ids, optionally with a
+ * Bedrock/Vertex-style provider prefix (`anthropic.`, `us.anthropic.`, ...).
+ * Excludes `<synthetic>` and non-Claude strings.
+ */
+export const DEFAULT_MODEL_PATTERN = '^(?:(?:us|eu|apac|global)\\.)?(?:anthropic\\.)?claude-';
+
+const PROVIDER_PREFIX = /^(?:(?:us|eu|apac|global)\.)?anthropic\./;
+/** Suffixes that denote a snapshot/variant of the same model, never a different one. */
+const ALLOWED_SUFFIX = /^(?:-\d{8}|@\d{8}|-v\d+(?::\d+)?|\[1m\])+$/;
+
+/** Strip a Bedrock-style provider prefix (`anthropic.`, `us.anthropic.`, `eu.`/`apac.`/`global.anthropic.`). */
+export function stripProviderPrefix(modelId: string): string {
+  return modelId.replace(PROVIDER_PREFIX, '');
+}
+
+/**
  * Resolve a model id against a registry.
  *
  * The upstream bug: resolveModel() only tested `modelId.startsWith(key)`.
@@ -10,8 +26,17 @@ import { ModelPricing } from './models';
  * a hardcoded 200_000-token window and null pricing — no error, just a
  * wrong number.
  *
- * Here resolution never guesses. `resolveModel` returns null on a genuine
- * miss so the UI can render an explicit "unknown model" state instead of a
+ * The inverse bug (also fixed here): a bare longest-prefix match priced
+ * `claude-opus-5-5` as `claude-opus-5` (wrong rates, 2.5x cache reads) and
+ * would do the same to any future model. A prefix match is therefore only
+ * accepted when the remainder is a known snapshot/variant suffix:
+ * `-YYYYMMDD`, `@YYYYMMDD`, `-v1:0`-style, or `[1m]` (combinable). Anything
+ * else is a different model and must be added to the registry.
+ *
+ * Provider prefixes (`anthropic.`, `us.anthropic.`, ...) are stripped first.
+ *
+ * Resolution never guesses: `resolveModel` returns null on a genuine miss so
+ * the UI can render an explicit "unknown model" state instead of a
  * plausible-looking wrong one.
  */
 export function resolveModel(
@@ -20,20 +45,18 @@ export function resolveModel(
 ): { key: string; entry: ModelPricing } | null {
   if (!modelId) return null;
 
-  if (registry[modelId]) return { key: modelId, entry: registry[modelId] };
+  if (Object.prototype.hasOwnProperty.call(registry, modelId)) return { key: modelId, entry: registry[modelId] };
 
-  // Longest registry key that is a *prefix* of the model id — handles
-  // dated snapshot ids like "claude-haiku-4-5-20251001" resolving against
-  // the bare alias "claude-haiku-4-5".
+  const id = stripProviderPrefix(modelId);
+  if (Object.prototype.hasOwnProperty.call(registry, id)) return { key: id, entry: registry[id] };
+
+  // Longest registry key that is a prefix of the id *and* followed only by an
+  // allowed snapshot/variant suffix.
   const keys = Object.keys(registry).sort((a, b) => b.length - a.length);
   for (const key of keys) {
-    if (modelId.startsWith(key)) return { key, entry: registry[key] };
-  }
-
-  // Strip a trailing dated suffix (-YYYYMMDD) and retry exact match once.
-  const stripped = modelId.replace(/-\d{8}$/, '');
-  if (stripped !== modelId && registry[stripped]) {
-    return { key: stripped, entry: registry[stripped] };
+    if (id.length > key.length && id.startsWith(key) && ALLOWED_SUFFIX.test(id.slice(key.length))) {
+      return { key, entry: registry[key] };
+    }
   }
 
   return null;
@@ -46,6 +69,6 @@ export function isTrackedModel(modelId: string | null | undefined, pattern: stri
     return new RegExp(pattern).test(modelId);
   } catch {
     // Invalid user-supplied regex — fail open to the safe default rather than crash.
-    return /^claude-/.test(modelId);
+    return new RegExp(DEFAULT_MODEL_PATTERN).test(modelId);
   }
 }

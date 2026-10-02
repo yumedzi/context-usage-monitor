@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { parseUsageLine, findLastUsageRecord } from '../src/core/transcript';
+import { DEFAULT_MODEL_PATTERN } from '../src/core/resolve';
 
 const opts = { modelPattern: '^claude-' };
 const fixturesDir = path.join(__dirname, 'fixtures');
@@ -63,6 +64,30 @@ describe('parseUsageLine', () => {
   it('defaults effort to null when absent', () => {
     const line = readFixture('dated-model.jsonl').trim();
     expect(parseUsageLine(line, opts)?.effort).toBeNull();
+  });
+});
+
+describe('parseUsageLine: speed / geo / web search', () => {
+  const mk = (usage: Record<string, unknown>) =>
+    JSON.stringify({ type: 'assistant', message: { id: 'm', model: 'claude-opus-5-5', usage: { input_tokens: 10, output_tokens: 5, ...usage } } });
+
+  it('extracts speed, inference_geo and web_search_requests', () => {
+    const r = parseUsageLine(mk({ speed: 'fast', inference_geo: 'us', server_tool_use: { web_search_requests: 2 } }), opts);
+    expect(r?.usage.speed).toBe('fast');
+    expect(r?.usage.inferenceGeo).toBe('us');
+    expect(r?.usage.webSearchRequests).toBe(2);
+  });
+
+  it('defaults to null/0 when absent', () => {
+    const r = parseUsageLine(mk({}), opts);
+    expect(r?.usage.speed).toBeNull();
+    expect(r?.usage.inferenceGeo).toBeNull();
+    expect(r?.usage.webSearchRequests).toBe(0);
+  });
+
+  it('accepts Bedrock-style model ids with the default pattern', () => {
+    const line = JSON.stringify({ type: 'assistant', message: { id: 'm', model: 'us.anthropic.claude-sonnet-5-v1:0', usage: { input_tokens: 1 } } });
+    expect(parseUsageLine(line, { modelPattern: DEFAULT_MODEL_PATTERN })?.model).toBe('us.anthropic.claude-sonnet-5-v1:0');
   });
 });
 

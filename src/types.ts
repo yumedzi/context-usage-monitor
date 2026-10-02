@@ -22,6 +22,14 @@ export interface MonthlyUsageInfo {
   totalCostUSD: number;
   periodStartISODate: string;
   known: boolean;
+  /** true when some turns could not be priced (unknown models), so totalCostUSD is a lower bound */
+  partial: boolean;
+  /** $ per resolved model key */
+  perModel: Record<string, number>;
+  /** unpriced model ids -> stats; excluded from totalCostUSD */
+  unknownModels: Record<string, { records: number; tokens: number }>;
+  /** clock the billing period boundary is measured on */
+  timeZone: 'local' | 'utc';
 }
 
 export type MonitorState =

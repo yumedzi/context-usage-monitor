@@ -8,7 +8,18 @@ export interface TurnUsage {
   cacheWrite5mTokens: number;
   /** cache-creation tokens written at 1-hour TTL */
   cacheWrite1hTokens: number;
+  /** `usage.speed` from the transcript ("fast" = fast mode, billed at the model's fastMultiplier) */
+  speed?: string | null;
+  /** `usage.inference_geo` from the transcript; "us" = US-only data residency (1.1x) */
+  inferenceGeo?: string | null;
+  /** `usage.server_tool_use.web_search_requests` */
+  webSearchRequests?: number;
 }
+
+/** $ per web search request ($10 per 1000 searches). Not affected by fast/geo multipliers. */
+export const WEB_SEARCH_COST_USD = 0.01;
+/** Multiplier on all token categories for `inference_geo: "us"` (data residency). */
+export const US_DATA_RESIDENCY_MULTIPLIER = 1.1;
 
 export interface CostResult {
   cost: number;
@@ -25,6 +36,15 @@ export interface CostResult {
  * Claude Code's own transcripts carry both `ephemeral_5m_input_tokens` and
  * `ephemeral_1h_input_tokens` under `usage.cache_creation`, so there's no
  * excuse to conflate them.
+ *
+ * Multipliers (all token categories; cache multipliers stack on top because
+ * they are already baked into the per-category rates):
+ *  - fast mode (`speed === "fast"`): entry.fastMultiplier. A model with no
+ *    fastMultiplier has no fast mode, so it is priced at the standard rate.
+ *  - `inference_geo === "us"`: 1.1x. Only 4.6+ models accept the parameter,
+ *    so no per-model gating is needed; "global", "not_available", "" and
+ *    missing all mean 1.0x.
+ * Web searches are added at $0.01 each, unmultiplied.
  */
 export function computeTurnCost(
   usage: TurnUsage,
@@ -33,12 +53,15 @@ export function computeTurnCost(
 ): CostResult {
   if (!entry) return { cost: 0, known: false };
   const p = effectivePricing(entry, atISODate);
-  const cost =
+  const fast = usage.speed === 'fast' ? p.fastMultiplier ?? 1 : 1;
+  const geo = usage.inferenceGeo?.toLowerCase() === 'us' ? US_DATA_RESIDENCY_MULTIPLIER : 1;
+  const tokenCost =
     usage.inputTokens * p.input +
     usage.cacheWrite5mTokens * p.cacheWrite5m +
     usage.cacheWrite1hTokens * p.cacheWrite1h +
     usage.cacheReadTokens * p.cacheRead +
     usage.outputTokens * p.output;
+  const cost = tokenCost * fast * geo + (usage.webSearchRequests ?? 0) * WEB_SEARCH_COST_USD;
   return { cost, known: true };
 }
 

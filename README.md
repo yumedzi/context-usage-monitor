@@ -61,7 +61,17 @@ exception, described in full in [Network access](#network-access).
 - An explicit "unknown model" state (never a silently wrong number) when a
   model isn't in the registry — add it yourself via `pricing.models`.
 - Per-turn, per-session, and monthly-to-date cost, with separate 5m/1h
-  cache-write pricing.
+  cache-write pricing, per-model cache-read rates (Opus 5.5 and Fable/Mythos
+  5.1 differ from the usual 0.1x), fast-mode (2x on supporting Opus models),
+  `inference_geo: "us"` data-residency (1.1x) and web-search ($0.01 each)
+  surcharges.
+- **Never silently wrong:** a model the registry can't price (e.g. a brand-new
+  one) is excluded and flagged — the monthly/session figure renders as a lower
+  bound (`≥ $X`) and the tooltip lists the unrecognized ids. Model ids match
+  exactly or by a dated/`@date`/`-v1:0`/`[1m]` snapshot suffix only
+  (`claude-opus-5-5` is never priced as `claude-opus-5`).
+- A per-model month-to-date breakdown in **Show Usage Report** and **Copy
+  Diagnostics**, for comparing against your gateway's own report.
 - A configurable local monthly spend total (see [Scope](#scope) below).
 - On a subscription plan: 5-hour and weekly rate-limit gauges right in the
   status bar (`5h:34% · w:53%`), on by default. They refresh **the instant a
@@ -93,10 +103,11 @@ All settings live under `contextUsageMonitor.*`:
 | `statusBar.showEffort` | `true` | Show the reasoning-effort level (low/medium/high) in parentheses after the model name, when Claude Code recorded one. |
 | `statusBar.showMonthlyCost` | `false` | Show month-to-date cost, appended at the end. Renders even while idle — it's a background total, not tied to the current turn. |
 | `tooltip.sections` | all | Ordered list from: `turn`, `context`, `cache`, `rateLimits`, `cost`, `monthly`, `links`. |
-| `pricing.models` | `{}` | Per-model `input`/`output`/`cacheRead`/`cacheWrite5m`/`cacheWrite1h` ($/token) and `contextWindow` overrides, merged over the built-in defaults. |
+| `pricing.models` | `{}` | Per-model overrides merged over the built-in defaults. Prices as `input`/`output`/`cacheRead`/`cacheWrite5m`/`cacheWrite1h` ($/token) **or** `inputPerMTok`/`outputPerMTok`/`cacheReadPerMTok`/`cacheWrite5mPerMTok`/`cacheWrite1hPerMTok` ($/million tokens, e.g. `{"claude-foo-1": {"inputPerMTok": 3, "outputPerMTok": 15, "cacheReadPerMTok": 0.3}}`), plus `contextWindow` and `fastMultiplier`. If you override `input` without the cache fields, cache rates are re-derived from it (read keeps the model's ratio, default 0.1x; writes 1.25x/2x). |
 | `pricing.currencySymbol` | `$` | Currency symbol for formatted costs. |
 | `usage.billingCycleStartDay` | `1` | Day of month (1–28) your monthly total resets on. |
-| `filters.modelPattern` | `^claude-` | Regex a model id must match to count at all. |
+| `usage.billingCycleTimeZone` | `local` | `local` or `utc`: which clock the period boundary (midnight on the start day) is measured on. Use `utc` if your gateway/provider budget resets at 00:00 UTC. The tooltip labels the period `(UTC)` when set. |
+| `filters.modelPattern` | `^(?:(?:us\|eu\|apac\|global)\.)?(?:anthropic\.)?claude-` | Regex a model id must match to count at all. The default also accepts Bedrock-style ids (`us.anthropic.claude-…`); it excludes `<synthetic>`, aliases like `sonnet`, and non-Claude strings. |
 | `filters.includeSidechainsInContext` | `false` | Include subagent turns in the context gauge (they always count toward cost). |
 | `contextWindowOverrides` | `{}` | Shortcut for `pricing.models.<id>.contextWindow`. |
 | `rateLimits.enabled` | `true` | Show the 5-hour/weekly gauges. Makes a network request — see [Network access](#network-access). |
@@ -163,6 +174,38 @@ on disk. The 5-hour/weekly rate-limit gauges are the one exception:
 - Turn it off entirely with `contextUsageMonitor.rateLimits.enabled: false`,
   or keep the gauges but drop the idle-time backstop with
   `rateLimits.scheduledCheckEnabled: false`.
+
+## Why this may not match your bill or gateway
+
+The month-to-date number is a **local estimate at Anthropic list prices**, not
+your bill. Expect differences, in either direction, when:
+
+- **Other machines or tools share the same key.** A gateway budget (e.g. a
+  LiteLLM key) is counted per key; this extension only sees this machine's
+  `~/.claude/projects`. Other machines, CI, or other tools on the same key
+  make the gateway number higher.
+- **Claude Code makes calls that never reach the transcripts** — background
+  requests such as title generation and compaction are billed but not written
+  to the JSONL files.
+- **Transcripts were deleted.** Claude Code removes old sessions according to
+  `cleanupPeriodDays`; deleted transcripts drop out of the total.
+- **`~/.claude` isn't visible to the extension** — WSL, devcontainers, and
+  remote SSH hosts keep their own `~/.claude` that a local VS Code window
+  can't read.
+- **The gateway uses its own price table or discounts** (negotiated rates,
+  markups, a different table such as LiteLLM's), whereas this extension uses
+  the public Anthropic list price.
+- **Bedrock/Vertex regional endpoints** carry a ~10% premium over list price
+  that is not modelled here.
+- **Sonnet 4.x long-context (>200K) premium** is not modelled.
+- **Unrecognized models** are excluded; the figure then shows as `≥ $X` and
+  the tooltip names them. Add them via `pricing.models`.
+- **Billing-period boundary.** The period starts at local midnight by default;
+  set `usage.billingCycleTimeZone` to `utc` if your budget resets at 00:00 UTC.
+
+For budget enforcement, treat the gateway's own report (for example
+`agentix token-cost report`) as the authority. Use the per-model breakdown
+(**Show Usage Report** / **Copy Diagnostics**) to compare model by model.
 
 ## Scope
 

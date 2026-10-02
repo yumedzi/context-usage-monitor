@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { formatCost, formatTokens } from './core/format';
+import { formatCost, formatCostPartial, formatTokens } from './core/format';
 import { RateLimitSnapshot } from './core/rateLimits';
 import { ExtensionConfig, RateLimitColorThresholds, StatusBarSegment } from './settings';
 import { MonitorState, MonthlyUsageInfo, TurnSnapshot } from './types';
@@ -7,6 +7,10 @@ import { MonitorState, MonthlyUsageInfo, TurnSnapshot } from './types';
 export interface CostTotal {
   cost: number;
   known: boolean;
+  /** true when some turns could not be priced (unknown models): `cost` is a lower bound */
+  partial?: boolean;
+  /** unpriced model id -> record count */
+  unknownModels?: Record<string, number>;
 }
 
 export interface StatusBarRenderResult {
@@ -83,7 +87,7 @@ function assembleParts(baseParts: string[], monthlyPart: string | null, sep: str
 
 function renderMonthlyPart(config: ExtensionConfig, monthly: MonthlyUsageInfo | null): string | null {
   if (!config.statusBar.showMonthlyCost || !monthly) return null;
-  return `m:${formatCost(monthly.totalCostUSD, monthly.known, config.pricing.currencySymbol)}`;
+  return `m:${formatCostPartial(monthly.totalCostUSD, monthly.known, monthly.partial, config.pricing.currencySymbol)}`;
 }
 
 /**
@@ -168,7 +172,7 @@ function renderSegment(
     case 'turnCost':
       return formatCost(turn.turnCost, turn.turnCostKnown, currency);
     case 'sessionCost':
-      return sessionCost ? `Session ${formatCost(sessionCost.cost, sessionCost.known, currency)}` : null;
+      return sessionCost ? `Session ${formatCostPartial(sessionCost.cost, sessionCost.known, sessionCost.partial ?? false, currency)}` : null;
     case 'idleState':
       return null;
     default:
